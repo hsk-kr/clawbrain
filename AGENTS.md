@@ -114,6 +114,8 @@ There are no config files or environment variables. Everything is hardcoded cons
 | Default TTL | `720h` (30 days) | CLI flag default |
 | Default min-score | `0.0` | CLI flag default |
 | Default limit | `1` | CLI flag default |
+| Default recency-boost | `0.0` (off) | CLI flag default |
+| Default recency-scale | `3600` (1 hour) | CLI flag default |
 | Distance metric | Cosine | `internal/store/store.go` |
 
 ## CLI Reference
@@ -142,7 +144,7 @@ Automatically adds `created_at` and `last_accessed` timestamps to the payload. A
 Retrieve similar memories.
 
 ```bash
-clawbrain retrieve --collection <name> --vector '<json array>' [--min-score 0.7] [--limit 1]
+clawbrain retrieve --collection <name> --vector '<json array>' [--min-score 0.7] [--limit 1] [--recency-boost 0.2] [--recency-scale 3600]
 ```
 
 | Flag | Required | Default | Description |
@@ -151,8 +153,12 @@ clawbrain retrieve --collection <name> --vector '<json array>' [--min-score 0.7]
 | `--vector` | yes | -- | Query embedding as JSON array |
 | `--min-score` | no | `0.0` | Minimum similarity score threshold |
 | `--limit` | no | `1` | Maximum number of results |
+| `--recency-boost` | no | `0.0` | Recency boost weight (0.0 = off, higher = stronger short-term memory effect) |
+| `--recency-scale` | no | `3600` | Seconds until recency boost decays to half strength |
 
 Updates `last_accessed` on all returned memories (keeps them alive for decay).
+
+When `--recency-boost` is set above 0, retrieval uses Qdrant's Formula Query to blend cosine similarity with a time-decay boost on `last_accessed`. Recently-accessed memories get a natural score advantage that fades over time -- like short-term memory. The formula is: `score = similarity + recency_boost * exp_decay(time_since_last_access, scale)`.
 
 ### `clawbrain forget`
 

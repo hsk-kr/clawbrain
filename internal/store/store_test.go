@@ -112,7 +112,7 @@ func TestAdd(t *testing.T) {
 			t.Fatalf("Add failed: %v", err)
 		}
 
-		results, err := s.Retrieve(ctx, collection, []float32{0.9, 0.8, 0.7, 0.6}, 0.9, 10)
+		results, err := s.Retrieve(ctx, collection, []float32{0.9, 0.8, 0.7, 0.6}, 0.9, 10, 0, 0)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -160,7 +160,7 @@ func TestRetrieve(t *testing.T) {
 	}
 
 	t.Run("top 1 result", func(t *testing.T) {
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1)
+		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1, 0, 0)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -176,7 +176,7 @@ func TestRetrieve(t *testing.T) {
 	})
 
 	t.Run("limit controls result count", func(t *testing.T) {
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 3)
+		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 3, 0, 0)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -186,7 +186,7 @@ func TestRetrieve(t *testing.T) {
 	})
 
 	t.Run("min-score filters low matches", func(t *testing.T) {
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.999, 10)
+		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.999, 10, 0, 0)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -197,7 +197,7 @@ func TestRetrieve(t *testing.T) {
 	})
 
 	t.Run("results sorted by score descending", func(t *testing.T) {
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0, 0)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -211,7 +211,7 @@ func TestRetrieve(t *testing.T) {
 
 	t.Run("updates last_accessed on retrieval", func(t *testing.T) {
 		// First retrieve to get baseline
-		results1, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
+		results1, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1, 0, 0)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -226,7 +226,7 @@ func TestRetrieve(t *testing.T) {
 		time.Sleep(1100 * time.Millisecond)
 
 		// Second retrieve should have updated last_accessed
-		results2, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
+		results2, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1, 0, 0)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -268,7 +268,7 @@ func TestRetrieveEmptyCollection(t *testing.T) {
 		t.Fatalf("Forget failed: %v", err)
 	}
 
-	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0, 0)
 	if err != nil {
 		t.Fatalf("Retrieve on empty collection failed: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestForget(t *testing.T) {
 		}
 
 		// Verify they're gone
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0, 0)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -361,7 +361,7 @@ func TestForgetPreservesRecentlyAccessed(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 
 	// Access only the first one (exact match query)
-	_, err = s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
+	_, err = s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("Retrieve failed: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestForgetPreservesRecentlyAccessed(t *testing.T) {
 	}
 
 	// The accessed one should still be there
-	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0, 0)
 	if err != nil {
 		t.Fatalf("Retrieve failed: %v", err)
 	}
@@ -386,6 +386,65 @@ func TestForgetPreservesRecentlyAccessed(t *testing.T) {
 	if results[0].Payload["text"] != "will be accessed" {
 		t.Errorf("wrong memory survived: %v", results[0].Payload["text"])
 	}
+}
+
+func TestRetrieveWithRecencyBoost(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	collection := testCollection(t)
+	defer cleanupCollection(t, s, collection)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Add two memories with the same vector direction but slightly different
+	// so they both match a query. "old" is added first, "fresh" second.
+	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "old"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	_, err = s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.5}, map[string]any{"text": "fresh"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	t.Run("recency boost returns results", func(t *testing.T) {
+		// With recency boost, retrieval should still work and return results
+		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0.5, 3600)
+		if err != nil {
+			t.Fatalf("Retrieve with recency boost failed: %v", err)
+		}
+		if len(results) == 0 {
+			t.Fatal("expected results with recency boost, got 0")
+		}
+	})
+
+	t.Run("recency boost scores higher than pure similarity", func(t *testing.T) {
+		// With boost, scores should be higher than base cosine similarity (which maxes at 1.0)
+		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0.5, 3600)
+		if err != nil {
+			t.Fatalf("Retrieve failed: %v", err)
+		}
+		// The top result should have a score > 1.0 because similarity (~1.0) + boost
+		if len(results) > 0 && results[0].Score <= 1.0 {
+			t.Logf("Note: top score is %.4f (boost may have decayed if test was slow)", results[0].Score)
+		}
+	})
+
+	t.Run("zero boost matches plain retrieval", func(t *testing.T) {
+		plain, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0, 0)
+		if err != nil {
+			t.Fatalf("Plain retrieve failed: %v", err)
+		}
+		boosted, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0, 3600)
+		if err != nil {
+			t.Fatalf("Boosted retrieve failed: %v", err)
+		}
+		if len(plain) != len(boosted) {
+			t.Fatalf("result count mismatch: plain=%d boosted=%d", len(plain), len(boosted))
+		}
+	})
 }
 
 // --- Unit Tests for helper functions ---

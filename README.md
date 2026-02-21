@@ -35,6 +35,12 @@ clawbrain retrieve --collection memories \
   --vector '[0.1, 0.2, 0.3, 0.4]' \
   --min-score 0.7 --limit 5
 
+# Recall with short-term memory boost
+clawbrain retrieve --collection memories \
+  --vector '[0.1, 0.2, 0.3, 0.4]' \
+  --min-score 0.7 --limit 5 \
+  --recency-boost 0.2 --recency-scale 3600
+
 # Let old memories fade
 clawbrain forget --collection memories --ttl 720h
 
@@ -49,6 +55,8 @@ All output is JSON. Agents parse structured data, so that's what ClawBrain speak
 **Remembering.** An agent stores a vector (the semantic meaning of something) along with metadata (the details). ClawBrain timestamps it and keeps it alive.
 
 **Recalling.** When an agent needs to remember something, it sends a query vector. ClawBrain finds the closest matches -- the memories that feel most similar. Every time a memory is recalled, its timestamp refreshes. Memories that get used stay alive.
+
+**Short-term memory.** Things you just experienced are vivid and easy to recall. ClawBrain supports this with `--recency-boost` -- recently-accessed memories get a natural score advantage that fades over time. A memory recalled 5 seconds ago feels sharp. One from last week? Still there, but only if it's truly similar. The boost decays exponentially, controlled by `--recency-scale` (default: 1 hour half-life).
 
 **Forgetting.** Memories that are never recalled gradually become candidates for removal. Run `forget` with a time window, and anything that hasn't been accessed within that window disappears. Just like how you forget the name of someone you met once at a party three years ago. It's natural. It's healthy.
 

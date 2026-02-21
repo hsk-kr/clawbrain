@@ -96,6 +96,8 @@ func runRetrieve(args []string) {
 	vectorJSON := fs.String("vector", "", "Query embedding as JSON array (required)")
 	minScore := fs.Float64("min-score", 0.0, "Minimum similarity score threshold")
 	limit := fs.Uint64("limit", 1, "Maximum number of results")
+	recencyBoost := fs.Float64("recency-boost", 0.0, "Recency boost weight (0.0 = off, higher = stronger short-term memory effect)")
+	recencyScale := fs.Float64("recency-scale", 3600, "Seconds until recency boost decays to half strength")
 	fs.Parse(args)
 
 	if *collection == "" || *vectorJSON == "" {
@@ -113,7 +115,7 @@ func runRetrieve(args []string) {
 	defer cancel()
 	defer s.Close()
 
-	results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit)
+	results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit, float32(*recencyBoost), float32(*recencyScale))
 	if err != nil {
 		exitJSON("error", err.Error())
 	}

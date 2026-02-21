@@ -102,23 +102,70 @@ func (s *Store) Add(ctx context.Context, collection string, id string, vector []
 
 // Retrieve queries the collection and returns the top matches.
 // It updates last_accessed on all returned points.
-func (s *Store) Retrieve(ctx context.Context, collection string, vector []float32, minScore float32, limit uint64) ([]Result, error) {
-	results, err := s.client.Query(ctx, &qdrant.QueryPoints{
-		CollectionName: collection,
-		Query:          qdrant.NewQuery(vector...),
-		WithPayload:    qdrant.NewWithPayload(true),
-		ScoreThreshold: &minScore,
-		Limit:          &limit,
-	})
+//
+// When recencyBoost > 0, retrieval uses Qdrant's Formula Query to blend
+// cosine similarity with a time-decay boost on last_accessed. This gives
+// recently-accessed memories a natural advantage -- like short-term memory.
+// The final score becomes: similarity + recencyBoost * exp_decay(age).
+// recencyScale controls how fast the boost fades (in seconds).
+//
+// When recencyBoost == 0, retrieval uses plain cosine similarity (unchanged).
+func (s *Store) Retrieve(ctx context.Context, collection string, vector []float32, minScore float32, limit uint64, recencyBoost float32, recencyScale float32) ([]Result, error) {
+	var query *qdrant.QueryPoints
+
+	if recencyBoost > 0 {
+		// Formula Query: $score + recencyBoost * exp_decay(last_accessed → now, scale)
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+
+		query = &qdrant.QueryPoints{
+			CollectionName: collection,
+			Prefetch: []*qdrant.PrefetchQuery{
+				{
+					Query:          qdrant.NewQuery(vector...),
+					ScoreThreshold: &minScore,
+					Limit:          qdrant.PtrOf(limit),
+				},
+			},
+			Query: qdrant.NewQueryFormula(&qdrant.Formula{
+				Expression: qdrant.NewExpressionSum(&qdrant.SumExpression{
+					Sum: []*qdrant.Expression{
+						qdrant.NewExpressionVariable("$score"),
+						qdrant.NewExpressionMult(&qdrant.MultExpression{
+							Mult: []*qdrant.Expression{
+								qdrant.NewExpressionConstant(recencyBoost),
+								qdrant.NewExpressionExpDecay(&qdrant.DecayParamsExpression{
+									X:      qdrant.NewExpressionDatetimeKey("last_accessed"),
+									Target: qdrant.NewExpressionDatetime(now),
+									Scale:  qdrant.PtrOf(recencyScale),
+								}),
+							},
+						}),
+					},
+				}),
+			}),
+			WithPayload: qdrant.NewWithPayload(true),
+			Limit:       &limit,
+		}
+	} else {
+		query = &qdrant.QueryPoints{
+			CollectionName: collection,
+			Query:          qdrant.NewQuery(vector...),
+			WithPayload:    qdrant.NewWithPayload(true),
+			ScoreThreshold: &minScore,
+			Limit:          &limit,
+		}
+	}
+
+	results, err := s.client.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
 	out := make([]Result, 0, len(results))
 
 	for _, point := range results {
-		s.updateLastAccessed(ctx, collection, point.Id, now)
+		s.updateLastAccessed(ctx, collection, point.Id, nowStr)
 
 		out = append(out, Result{
 			ID:      pointIDToString(point.Id),
