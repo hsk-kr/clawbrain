@@ -835,6 +835,204 @@ func TestCLIGlobalHostFlag(t *testing.T) {
 	}
 }
 
+// --- Confidence field tests ---
+
+func TestCLIConfidenceFieldPresent(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_confidence_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add a memory
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+		"--payload", `{"text": "confidence test"}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// Retrieve — response should include confidence field
+	out, err = runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+	)
+	if err != nil {
+		t.Fatalf("retrieve failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	conf, ok := result["confidence"].(string)
+	if !ok {
+		t.Fatalf("expected confidence field as string, got %v (%T)", result["confidence"], result["confidence"])
+	}
+	if conf != "high" && conf != "medium" && conf != "low" && conf != "none" {
+		t.Errorf("unexpected confidence value %q", conf)
+	}
+}
+
+func TestCLIConfidenceHigh(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_conf_high_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add and retrieve with identical vector — score ~1.0, should be "high"
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.5, 0.5, 0.5, 0.5]",
+		"--payload", `{"text": "exact match"}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	out, err = runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--vector", "[0.5, 0.5, 0.5, 0.5]",
+	)
+	if err != nil {
+		t.Fatalf("retrieve failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["confidence"] != "high" {
+		t.Errorf("expected confidence 'high' for exact match, got %v", result["confidence"])
+	}
+}
+
+func TestCLIConfidenceNone(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_conf_none_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add a memory then search with min-score so high nothing matches
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+		"--payload", `{"text": "will not match"}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	out, err = runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--vector", "[0.9, -0.9, 0.9, -0.9]",
+		"--min-score", "0.99",
+	)
+	if err != nil {
+		t.Fatalf("retrieve failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["confidence"] != "none" {
+		t.Errorf("expected confidence 'none' for empty results, got %v", result["confidence"])
+	}
+	count, _ := result["count"].(float64)
+	if count != 0 {
+		t.Errorf("expected 0 results, got %v", count)
+	}
+}
+
+func TestCLIConfidenceLow(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_conf_low_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add a memory with one vector, query with a very different one
+	// Cosine similarity of orthogonal-ish vectors should be low
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[1.0, 0.0, 0.0, 0.0]",
+		"--payload", `{"text": "low confidence test"}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// Query with a nearly orthogonal vector — score should be close to 0
+	out, err = runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--vector", "[0.01, 1.0, 0.0, 0.0]",
+	)
+	if err != nil {
+		t.Fatalf("retrieve failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	conf := result["confidence"].(string)
+	if conf != "low" {
+		// Check the actual score to understand
+		results := result["results"].([]any)
+		if len(results) > 0 {
+			score := results[0].(map[string]any)["score"].(float64)
+			t.Errorf("expected confidence 'low' for near-orthogonal vectors, got %q (score: %.4f)", conf, score)
+		} else {
+			t.Errorf("expected confidence 'low', got %q", conf)
+		}
+	}
+}
+
+func TestCLIConfidenceWithTextQuery(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	collection := "test_cli_conf_text_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add a text memory
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--text", "the cat sat on the mat",
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// Query with semantically related text — should have confidence field
+	out, err = runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--query", "cat sitting on a mat",
+		"--limit", "3",
+	)
+	if err != nil {
+		t.Fatalf("retrieve failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	conf, ok := result["confidence"].(string)
+	if !ok {
+		t.Fatalf("expected confidence field as string in text mode, got %v (%T)", result["confidence"], result["confidence"])
+	}
+	// For nearly identical text, confidence should be high
+	if conf != "high" {
+		results := result["results"].([]any)
+		if len(results) > 0 {
+			score := results[0].(map[string]any)["score"].(float64)
+			t.Logf("Note: confidence=%q, top score=%.4f", conf, score)
+		}
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }

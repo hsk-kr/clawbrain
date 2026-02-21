@@ -216,9 +216,10 @@ func runRetrieve(args []string) {
 		}
 
 		outputJSON(map[string]any{
-			"status":  "ok",
-			"results": results,
-			"count":   len(results),
+			"status":     "ok",
+			"results":    results,
+			"count":      len(results),
+			"confidence": confidence(results),
 		})
 	} else if *query != "" {
 		// Default text mode: embed query via Ollama, then search
@@ -234,9 +235,10 @@ func runRetrieve(args []string) {
 		}
 
 		outputJSON(map[string]any{
-			"status":  "ok",
-			"results": results,
-			"count":   len(results),
+			"status":     "ok",
+			"results":    results,
+			"count":      len(results),
+			"confidence": confidence(results),
 		})
 	} else {
 		fmt.Fprintln(os.Stderr, "Error: --query is required (or --vector for advanced mode)")
@@ -316,6 +318,24 @@ func runCheck() {
 		"status":  "ok",
 		"message": "Qdrant and Ollama verified",
 	})
+}
+
+// confidence returns a confidence label based on the top result score.
+// This helps agents quickly assess whether the results are trustworthy
+// without needing to interpret raw similarity scores.
+func confidence(results []store.Result) string {
+	if len(results) == 0 {
+		return "none"
+	}
+	top := results[0].Score
+	switch {
+	case top >= 0.7:
+		return "high"
+	case top >= 0.4:
+		return "medium"
+	default:
+		return "low"
+	}
 }
 
 // connect creates a store connection and a context with timeout.
