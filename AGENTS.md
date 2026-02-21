@@ -96,8 +96,6 @@ clawbrain search --collection <name> --query 'search text' [--limit 5]
 | `--query` | yes | -- | Text to search for (semantic search) |
 | `--limit` | no | `1` | Maximum number of memories to return |
 | `--min-score` | no | `0.0` | Minimum similarity score threshold |
-| `--recency-boost` | no | `0.0` | Recency boost weight (0 = off) |
-| `--recency-scale` | no | `3600` | Seconds until recency boost decays to half strength |
 
 Your query is embedded via Ollama and compared against stored vectors by cosine similarity. Results are ranked by relevance -- the most semantically similar memories come first.
 
