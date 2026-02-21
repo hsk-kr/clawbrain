@@ -64,16 +64,9 @@ func (s *Store) ensureCollection(ctx context.Context, name string, vectorSize ui
 	return nil
 }
 
-// textCollectionVectorSize is the dummy vector dimension used for text-only collections.
-// Qdrant requires every collection to have a vector config, so we use a minimal 1-d vector.
-const textCollectionVectorSize = 4
-
-// dummyVector is a placeholder vector for text-only points.
-var dummyVector = []float32{0.0, 0.0, 0.0, 0.0}
-
 // ensureTextCollection creates a collection configured for text search.
-// It creates the collection (if needed) and ensures a full-text index exists
-// on the "text" payload field.
+// It uses a sparse vector config so no dense vectors are needed — points
+// store only payload (text + metadata) and are searched via the full-text index.
 func (s *Store) ensureTextCollection(ctx context.Context, name string) error {
 	created := false
 
@@ -84,10 +77,10 @@ func (s *Store) ensureTextCollection(ctx context.Context, name string) error {
 	if !exists {
 		err = s.client.CreateCollection(ctx, &qdrant.CreateCollection{
 			CollectionName: name,
-			VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
-				Size:     textCollectionVectorSize,
-				Distance: qdrant.Distance_Cosine,
-			}),
+			SparseVectorsConfig: qdrant.NewSparseVectorsConfig(
+				map[string]*qdrant.SparseVectorParams{
+					"_text": {},
+				}),
 		})
 		if err != nil {
 			return fmt.Errorf("create collection: %w", err)
@@ -96,8 +89,6 @@ func (s *Store) ensureTextCollection(ctx context.Context, name string) error {
 	}
 
 	// Create full-text index on the "text" field if we just created the collection.
-	// For existing collections, we attempt it anyway — CreateFieldIndex is idempotent
-	// when the index already exists (Qdrant returns success).
 	if created {
 		if err := s.createTextIndex(ctx, name); err != nil {
 			return err
@@ -194,8 +185,10 @@ func (s *Store) AddText(ctx context.Context, collection string, id string, text 
 		Wait:           &wait,
 		Points: []*qdrant.PointStruct{
 			{
-				Id:      pointID,
-				Vectors: qdrant.NewVectors(dummyVector...),
+				Id: pointID,
+				Vectors: qdrant.NewVectorsMap(map[string]*qdrant.Vector{
+					"_text": qdrant.NewVectorSparse([]uint32{}, []float32{}),
+				}),
 				Payload: qdrant.NewValueMap(payload),
 			},
 		},
