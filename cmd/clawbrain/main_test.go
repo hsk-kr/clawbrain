@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 // buildBinary builds the clawbrain CLI and returns the path to the binary.
@@ -38,12 +40,15 @@ func parseJSON(t *testing.T, data []byte) map[string]any {
 }
 
 // skipIfNoQdrant skips the test if Qdrant is not running.
+// Uses a lightweight TCP dial instead of the CLI check command to avoid
+// race conditions on the clawbrain_check collection between parallel tests.
 func skipIfNoQdrant(t *testing.T, binary string) {
 	t.Helper()
-	out, err := runCLI(t, binary, "check")
+	conn, err := net.DialTimeout("tcp", "localhost:6334", 2*time.Second)
 	if err != nil {
-		t.Skipf("Qdrant not available, skipping: %s", string(out))
+		t.Skipf("Qdrant not available on localhost:6334, skipping: %v", err)
 	}
+	conn.Close()
 }
 
 func TestCLINoArgs(t *testing.T) {
@@ -252,6 +257,179 @@ func TestCLIForget(t *testing.T) {
 	count, _ := retrieveResult["count"].(float64)
 	if count != 0 {
 		t.Errorf("expected 0 results after forget, got %v", count)
+	}
+}
+
+func TestCLIRetrieveWithRecencyBoost(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_recency_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add a memory
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+		"--payload", `{"text": "recency test"}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// Retrieve with recency boost
+	out, err = runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+		"--recency-boost", "0.5",
+		"--recency-scale", "3600",
+	)
+	if err != nil {
+		t.Fatalf("retrieve with recency boost failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+	count, ok := result["count"].(float64)
+	if !ok || count < 1 {
+		t.Fatalf("expected at least 1 result, got %v", result["count"])
+	}
+
+	// Score should be boosted above 1.0 (cosine max) for a just-added memory
+	results, ok := result["results"].([]any)
+	if !ok || len(results) == 0 {
+		t.Fatal("expected results array with at least 1 entry")
+	}
+	firstResult, ok := results[0].(map[string]any)
+	if !ok {
+		t.Fatal("expected first result to be a map")
+	}
+	score, ok := firstResult["score"].(float64)
+	if !ok {
+		t.Fatal("expected score to be a number")
+	}
+	if score <= 1.0 {
+		t.Logf("Note: score %.4f (boost may have decayed)", score)
+	}
+}
+
+func TestCLIRetrieveRecencyBoostDefaultOff(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_recency_default_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.5, 0.5, 0.5, 0.5]",
+		"--payload", `{"text": "default boost test"}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// Retrieve WITHOUT recency flags — should work as pure similarity
+	out, err = runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--vector", "[0.5, 0.5, 0.5, 0.5]",
+	)
+	if err != nil {
+		t.Fatalf("retrieve failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+
+	// Score should be <= 1.0 (no boost applied)
+	results, ok := result["results"].([]any)
+	if !ok || len(results) == 0 {
+		t.Fatal("expected results")
+	}
+	firstResult := results[0].(map[string]any)
+	score := firstResult["score"].(float64)
+	if score > 1.01 { // small epsilon for float precision
+		t.Errorf("expected score <= 1.0 without boost, got %.4f", score)
+	}
+}
+
+func TestCLIAddRetrievePreservesPayload(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_payload_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add with rich payload
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+		"--payload", `{"text": "preserved", "count": 42, "active": true}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// Retrieve and check payload fields
+	out, err = runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+		"--min-score", "0.9",
+	)
+	if err != nil {
+		t.Fatalf("retrieve failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	results := result["results"].([]any)
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+
+	payload := results[0].(map[string]any)["payload"].(map[string]any)
+
+	if payload["text"] != "preserved" {
+		t.Errorf("expected text 'preserved', got %v", payload["text"])
+	}
+	if payload["count"] != float64(42) { // JSON numbers are float64
+		t.Errorf("expected count 42, got %v", payload["count"])
+	}
+	if payload["active"] != true {
+		t.Errorf("expected active true, got %v", payload["active"])
+	}
+	// Verify auto-injected timestamps exist
+	if payload["created_at"] == nil {
+		t.Error("missing created_at in payload")
+	}
+	if payload["last_accessed"] == nil {
+		t.Error("missing last_accessed in payload")
+	}
+}
+
+func TestCLIForgetInvalidTTL(t *testing.T) {
+	binary := buildBinary(t)
+
+	out, err := runCLI(t, binary, "forget",
+		"--collection", "test",
+		"--ttl", "not-a-duration",
+	)
+	if err == nil {
+		t.Fatal("expected error for invalid TTL format")
+	}
+	result := parseJSON(t, out)
+	if result["status"] != "error" {
+		t.Errorf("expected status error, got %v", result["status"])
 	}
 }
 

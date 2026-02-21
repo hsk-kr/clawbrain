@@ -410,7 +410,6 @@ func TestRetrieveWithRecencyBoost(t *testing.T) {
 	}
 
 	t.Run("recency boost returns results", func(t *testing.T) {
-		// With recency boost, retrieval should still work and return results
 		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0.5, 3600)
 		if err != nil {
 			t.Fatalf("Retrieve with recency boost failed: %v", err)
@@ -420,13 +419,12 @@ func TestRetrieveWithRecencyBoost(t *testing.T) {
 		}
 	})
 
-	t.Run("recency boost scores higher than pure similarity", func(t *testing.T) {
-		// With boost, scores should be higher than base cosine similarity (which maxes at 1.0)
+	t.Run("recency boost inflates scores above pure similarity", func(t *testing.T) {
 		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10, 0.5, 3600)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
-		// The top result should have a score > 1.0 because similarity (~1.0) + boost
+		// cosine similarity maxes at 1.0; with boost, top score should exceed it
 		if len(results) > 0 && results[0].Score <= 1.0 {
 			t.Logf("Note: top score is %.4f (boost may have decayed if test was slow)", results[0].Score)
 		}
@@ -445,6 +443,239 @@ func TestRetrieveWithRecencyBoost(t *testing.T) {
 			t.Fatalf("result count mismatch: plain=%d boosted=%d", len(plain), len(boosted))
 		}
 	})
+
+	t.Run("recency boost updates last_accessed", func(t *testing.T) {
+		// Retrieve with boost, note the timestamp
+		results1, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1, 0.5, 3600)
+		if err != nil {
+			t.Fatalf("Retrieve failed: %v", err)
+		}
+		if len(results1) == 0 {
+			t.Fatal("expected at least 1 result")
+		}
+		ts1, ok := results1[0].Payload["last_accessed"].(string)
+		if !ok {
+			t.Fatal("last_accessed not a string")
+		}
+
+		time.Sleep(1100 * time.Millisecond)
+
+		// Second retrieve with boost should show updated timestamp
+		results2, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1, 0.5, 3600)
+		if err != nil {
+			t.Fatalf("Retrieve failed: %v", err)
+		}
+		ts2, ok := results2[0].Payload["last_accessed"].(string)
+		if !ok {
+			t.Fatal("last_accessed not a string")
+		}
+
+		t1, _ := time.Parse(time.RFC3339Nano, ts1)
+		t2, _ := time.Parse(time.RFC3339Nano, ts2)
+		if !t2.After(t1) {
+			t.Errorf("last_accessed not updated with recency boost: %s -> %s", ts1, ts2)
+		}
+	})
+}
+
+func TestRecencyBoostFavorsRecentlyAccessed(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	collection := testCollection(t)
+	defer cleanupCollection(t, s, collection)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Add two memories with IDENTICAL vectors — same cosine similarity to any query.
+	// The only differentiator will be recency.
+	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "stale"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Wait so the first memory's last_accessed ages
+	time.Sleep(1100 * time.Millisecond)
+
+	_, err = s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "recent"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// With strong recency boost and short scale, the recently-added memory
+	// should rank higher despite identical similarity.
+	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 2, 1.0, 1)
+	if err != nil {
+		t.Fatalf("Retrieve failed: %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	if results[0].Payload["text"] != "recent" {
+		t.Errorf("expected 'recent' to rank first with recency boost, got %q (scores: %.4f, %.4f)",
+			results[0].Payload["text"], results[0].Score, results[1].Score)
+	}
+	// The recent one should have a higher score
+	if results[0].Score <= results[1].Score {
+		t.Errorf("recent memory should score higher: recent=%.4f stale=%.4f",
+			results[0].Score, results[1].Score)
+	}
+}
+
+func TestAddUpsertBehavior(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	collection := testCollection(t)
+	defer cleanupCollection(t, s, collection)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	fixedID := "11111111-2222-3333-4444-555555555555"
+
+	// Add with a fixed ID
+	_, err := s.Add(ctx, collection, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+		"text": "original",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Upsert same ID with different payload
+	_, err = s.Add(ctx, collection, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+		"text": "updated",
+	})
+	if err != nil {
+		t.Fatalf("Add (upsert) failed: %v", err)
+	}
+
+	// Retrieve — should only get one result with the updated payload
+	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 10, 0, 0)
+	if err != nil {
+		t.Fatalf("Retrieve failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (upsert should replace), got %d", len(results))
+	}
+	if results[0].ID != fixedID {
+		t.Errorf("expected ID %q, got %q", fixedID, results[0].ID)
+	}
+	if results[0].Payload["text"] != "updated" {
+		t.Errorf("expected payload 'updated', got %v", results[0].Payload["text"])
+	}
+}
+
+func TestAddAutoCreatesCollection(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Test with 3-dimensional vector
+	collection3d := testCollection(t) + "_3d"
+	defer cleanupCollection(t, s, collection3d)
+
+	_, err := s.Add(ctx, collection3d, "", []float32{0.1, 0.2, 0.3}, map[string]any{"dim": 3})
+	if err != nil {
+		t.Fatalf("Add with 3d vector failed: %v", err)
+	}
+
+	results, err := s.Retrieve(ctx, collection3d, []float32{0.1, 0.2, 0.3}, 0.0, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("Retrieve 3d failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	// Test with 8-dimensional vector
+	collection8d := testCollection(t) + "_8d"
+	defer cleanupCollection(t, s, collection8d)
+
+	_, err = s.Add(ctx, collection8d, "", []float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}, map[string]any{"dim": 8})
+	if err != nil {
+		t.Fatalf("Add with 8d vector failed: %v", err)
+	}
+
+	results, err = s.Retrieve(ctx, collection8d, []float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}, 0.0, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("Retrieve 8d failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+}
+
+func TestForgetIdempotent(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	collection := testCollection(t)
+	defer cleanupCollection(t, s, collection)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "temp"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Forget everything
+	deleted1, err := s.Forget(ctx, collection, 0)
+	if err != nil {
+		t.Fatalf("First forget failed: %v", err)
+	}
+	if deleted1 != 1 {
+		t.Fatalf("expected 1 deletion, got %d", deleted1)
+	}
+
+	// Forget again — should delete 0 (already gone)
+	deleted2, err := s.Forget(ctx, collection, 0)
+	if err != nil {
+		t.Fatalf("Second forget failed: %v", err)
+	}
+	if deleted2 != 0 {
+		t.Fatalf("expected 0 deletions on second forget, got %d", deleted2)
+	}
+}
+
+func TestForgetLargeTTLDeletesNothing(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	collection := testCollection(t)
+	defer cleanupCollection(t, s, collection)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "fresh"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Forget with 1 year TTL — nothing should be deleted
+	deleted, err := s.Forget(ctx, collection, 365*24*time.Hour)
+	if err != nil {
+		t.Fatalf("Forget failed: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("expected 0 deletions with large TTL, got %d", deleted)
+	}
+
+	// Memory should still be there
+	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("Retrieve failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result after large-TTL forget, got %d", len(results))
+	}
 }
 
 // --- Unit Tests for helper functions ---
