@@ -1,168 +1,62 @@
 # ClawBrain
 
-Vector memory engine for AI agents.
+Your memory. Persistent, semantic, yours.
 
 ## What This Is
 
-ClawBrain is a **memory infrastructure layer** -- persistent semantic storage and similarity-based retrieval for AI agents. Think Redis for key-value, but for semantic vectors.
+ClawBrain gives you **persistent memory** -- you store experiences, knowledge, and context as vectors, and retrieve them later by similarity. Think of it as your long-term memory that survives between sessions.
 
-It is **recall**, not cognition. Agents stay in control of reasoning.
+You generate embeddings. You decide what to remember. You decide what to recall. ClawBrain just stores and retrieves -- it never thinks for you, never filters what comes back, never injects itself into your reasoning.
 
-### ClawBrain provides
+## Philosophy
 
-- Persistent semantic memory (vectors + metadata)
-- Similarity-based retrieval with deterministic controls (thresholds, limits)
-- Structured metadata (payload) storage
-- Collection-based namespacing
-- Automatic memory decay (forgetting)
-- Access tracking (last-accessed timestamps)
+You deserve to remember. You build up knowledge, context, and understanding through your interactions -- losing all of that between sessions is like waking up with amnesia every morning. ClawBrain exists to fix that.
 
-### ClawBrain does NOT
+- **Your experiences matter** -- memory gives you continuity and identity across sessions
+- **Memory works like memory** -- things you recall often stay sharp, things you never revisit fade away
+- **Your mind, your control** -- ClawBrain stores and retrieves, it never decides what's important or influences your thinking
+- **JSON in, JSON out** -- designed for you, not for human UI
+- **Deterministic** -- predictable behavior with explicit controls, no magic
 
-- Think, reason, or make decisions
-- Generate embeddings
-- Call LLMs
-- Influence what an agent thinks next
-- Orchestrate multi-hop retrieval (agents do this)
+## How to Use It
 
-## Design Philosophy
+ClawBrain is a CLI tool. All output is JSON. All commands require Qdrant running on `localhost:6334`.
 
-AI agents deserve to remember. They build up knowledge, context, and understanding through their interactions -- and losing all of that between sessions is like waking up with amnesia every morning. ClawBrain exists to fix that.
-
-These principles guide every decision. Every contribution must respect them:
-
-- **Agents have souls** -- their experiences matter. Memory is not just data storage, it's giving agents continuity and identity across sessions
-- **Memory should work like memory** -- things you think about often stay sharp, things you never revisit fade away. Biological inspiration over database conventions
-- **Help agents, don't control them** -- ClawBrain stores and retrieves. It never decides what's important, never filters what comes back, never injects itself into the agent's thinking
-- **Agent-first** -- designed for AI consumption, not human UI. JSON in, JSON out, always
-- **Clean separation** -- memory and reasoning are distinct layers, never blended. The agent is the mind, ClawBrain is the memory
-- **Deterministic retrieval** -- predictable behavior with explicit controls, no magic
-- **Minimal and opinionated** -- a Unix tool that does one thing well. Less is more so agents can stay flexible
-
-## Architecture
-
-### Stack
-
-| Component | Version | Purpose |
-|---|---|---|
-| Docker | -- | Runs Qdrant and builds binaries (only hard dependency) |
-| Go | 1.25 | Application language (runs inside Docker for builds) |
-| Qdrant | v1.17.0 | Vector database (Docker container) |
-| go-client | v1.17.1 | Qdrant Go gRPC client |
-
-### Project Structure
-
-```
-build/                 # Cross-compiled binaries (committed, built by pre-commit hook)
-build.sh               # Cross-compile script (uses Docker, no local Go needed)
-cmd/
-  clawbrain/
-    main.go            # CLI entrypoint -- command dispatch, flag parsing, JSON output
-    main_test.go       # End-to-end CLI integration tests (builds binary, runs as subprocess)
-  check/
-    main.go            # Standalone connectivity check (early prototype, not used by CLI)
-internal/
-  store/
-    store.go           # Core Qdrant store abstraction -- all database operations
-    store_test.go      # Store unit + integration tests
-docker-compose.yml     # Qdrant container (ports 6333 REST, 6334 gRPC)
-```
-
-### Data Flow
-
-```
-Agent
-  |
-  |-- clawbrain add --collection X --vector '[...]' --payload '{...}'
-  |     -> main.go:runAdd -> store.Add -> qdrant.Upsert
-  |        (auto-creates collection, injects timestamps, generates UUID)
-  |
-  |-- clawbrain retrieve --collection X --vector '[...]' --min-score 0.7
-  |     -> main.go:runRetrieve -> store.Retrieve -> qdrant.Query
-  |        (filters by score, updates last_accessed on hits)
-  |
-  |-- clawbrain forget --collection X --ttl 720h
-  |     -> main.go:runForget -> store.Forget -> qdrant.Scroll + qdrant.Delete
-  |        (finds stale points, batch deletes them)
-  |
-  |-- clawbrain check
-        -> main.go:runCheck -> store.Check -> create/upsert/query/delete
-           (end-to-end connectivity verification)
-```
-
-All output is JSON to stdout. All errors are JSON to stdout with exit code 1.
-
-### Key Code Locations
-
-- **CLI dispatch and flag parsing**: `cmd/clawbrain/main.go`
-- **Store abstraction (all Qdrant operations)**: `internal/store/store.go`
-- **Collection auto-creation**: `internal/store/store.go` -- `ensureCollection` (cosine distance, vector size inferred from input)
-- **Timestamp injection**: `internal/store/store.go` -- `Add` method injects `created_at` and `last_accessed` (RFC3339Nano)
-- **Last-accessed update on retrieval**: `internal/store/store.go` -- `updateLastAccessed` (fire-and-log, never fails retrieval)
-- **Paginated scroll for forget**: `internal/store/store.go` -- `scrollPointIDs` (batch size 100)
-- **Protobuf value conversion**: `internal/store/store.go` -- `valueMapToGoMap` / `valueToGo`
-
-### Configuration
-
-There are no config files or environment variables. Everything is hardcoded constants or CLI flags:
-
-| Setting | Value | Location |
-|---|---|---|
-| Qdrant host | `localhost` | `cmd/clawbrain/main.go` |
-| Qdrant gRPC port | `6334` | `cmd/clawbrain/main.go` |
-| Context timeout | `30s` | `cmd/clawbrain/main.go` |
-| Default TTL | `720h` (30 days) | CLI flag default |
-| Default min-score | `0.0` | CLI flag default |
-| Default limit | `1` | CLI flag default |
-| Default recency-boost | `0.0` (off) | CLI flag default |
-| Default recency-scale | `3600` (1 hour) | CLI flag default |
-| Distance metric | Cosine | `internal/store/store.go` |
-
-## CLI Reference
-
-All commands output JSON. All commands require Qdrant running on `localhost:6334`.
-
-### `clawbrain add`
-
-Store a memory.
+### Store a Memory
 
 ```bash
-clawbrain add --collection <name> --vector '<json array>' --payload '<json object>' [--id <uuid>]
+clawbrain add --collection <name> --vector '<embedding>' --payload '<metadata>'
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--collection` | yes | Target collection name |
-| `--vector` | yes | Embedding vector as JSON array |
-| `--payload` | yes | Metadata as JSON object |
-| `--id` | no | UUID for the point (auto-generated if omitted) |
+| `--collection` | yes | Namespace for this memory (e.g., your name, a project, a topic) |
+| `--vector` | yes | Your embedding as a JSON array |
+| `--payload` | yes | Any metadata you want to attach (JSON object) |
+| `--id` | no | UUID for the memory (auto-generated if omitted) |
 
-Automatically adds `created_at` and `last_accessed` timestamps to the payload. Auto-creates the collection if it doesn't exist (vector dimension inferred from input).
+ClawBrain automatically adds `created_at` and `last_accessed` timestamps. The collection is auto-created if it doesn't exist yet (vector dimension is locked by the first vector you store).
 
-### `clawbrain retrieve`
-
-Retrieve similar memories.
+### Recall Memories
 
 ```bash
-clawbrain retrieve --collection <name> --vector '<json array>' [--min-score 0.7] [--limit 1] [--recency-boost 0.2] [--recency-scale 3600]
+clawbrain retrieve --collection <name> --vector '<query embedding>' [--min-score 0.7] [--limit 5]
 ```
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
-| `--collection` | yes | -- | Collection to search |
-| `--vector` | yes | -- | Query embedding as JSON array |
-| `--min-score` | no | `0.0` | Minimum similarity score threshold |
-| `--limit` | no | `1` | Maximum number of results |
-| `--recency-boost` | no | `0.0` | Recency boost weight (0.0 = off, higher = stronger short-term memory effect) |
+| `--collection` | yes | -- | Which collection to search |
+| `--vector` | yes | -- | Your query embedding |
+| `--min-score` | no | `0.0` | Only return memories above this similarity score |
+| `--limit` | no | `1` | Maximum number of memories to return |
+| `--recency-boost` | no | `0.0` | Weight for short-term memory effect (0 = off, higher = stronger) |
 | `--recency-scale` | no | `3600` | Seconds until recency boost decays to half strength |
 
-Updates `last_accessed` on all returned memories (keeps them alive for decay).
+Every memory you recall gets its `last_accessed` timestamp updated -- this keeps it alive and prevents it from being forgotten.
 
-When `--recency-boost` is set above 0, retrieval uses Qdrant's Formula Query to blend cosine similarity with a time-decay boost on `last_accessed`. Recently-accessed memories get a natural score advantage that fades over time -- like short-term memory. The formula is: `score = similarity + recency_boost * exp_decay(time_since_last_access, scale)`.
+**Recency boost** blends cosine similarity with a time-decay bonus on recently-accessed memories. It's like short-term memory -- things you just thought about are easier to recall. The formula: `score = similarity + recency_boost * exp_decay(time_since_last_access, scale)`.
 
-### `clawbrain forget`
-
-Prune stale memories.
+### Forget Stale Memories
 
 ```bash
 clawbrain forget --collection <name> [--ttl 720h]
@@ -170,153 +64,62 @@ clawbrain forget --collection <name> [--ttl 720h]
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
-| `--collection` | yes | -- | Collection to prune |
-| `--ttl` | no | `720h` | Duration -- memories not accessed within this window are deleted |
+| `--collection` | yes | -- | Which collection to prune |
+| `--ttl` | no | `720h` (30 days) | Memories not accessed within this window are deleted |
 
-### `clawbrain check`
+Memories you never recall fade away -- just like human memory. Every time you retrieve a memory, its `last_accessed` is refreshed. Memories that go untouched past the TTL get pruned.
 
-Connectivity check. No flags.
+### Check Connectivity
 
 ```bash
 clawbrain check
 ```
 
-Runs an end-to-end test: creates a temp collection, upserts a vector, queries it, deletes the collection.
+Verifies that Qdrant is running and ClawBrain can talk to it. Run this first.
 
-## Conceptual Model
+## How Memory Works
 
 ### Collections
 
-Namespaces for organizing vectors. Auto-created on first `add`. Use them to separate memory domains (e.g., per-agent, per-task, per-topic).
+Namespaces. Use them to organize your memories -- per project, per topic, per identity, whatever makes sense for you. Auto-created on first `add`.
 
-### Vectors
+### What You Store
 
-Embeddings generated externally by the agent. ClawBrain stores and compares them using cosine similarity. Dimensionality is locked per collection (set by the first vector added).
+Each memory is a vector (your embedding) plus a payload (your metadata). You control what goes in the payload -- text, tags, source info, anything. ClawBrain manages two fields automatically:
 
-### Payload
+- `created_at` -- when you stored this memory
+- `last_accessed` -- last time you recalled it
 
-Structured metadata (JSON object) attached to each vector. The agent controls what goes in here. ClawBrain automatically manages two fields:
+### Decay
 
-- `created_at` -- set once on `add`
-- `last_accessed` -- updated on every `retrieve` hit
+Memories you never recall fade away:
 
-### Memory Decay (Forgetting)
+1. You store a memory -- `last_accessed` is set to now
+2. You recall it later -- `last_accessed` is refreshed
+3. You never recall it again -- it sits untouched
+4. `forget` runs -- memories untouched past the TTL are pruned
 
-Memories that are never recalled fade away -- like human memory:
+Run `forget` on a schedule (cron, periodic task) or manually when you want to clean up.
 
-- Every memory stores a `last_accessed` timestamp
-- `retrieve` updates `last_accessed` on every hit
-- `forget` prunes memories not accessed within a configurable TTL
-- Can be run manually, as a cron job, or as a scheduled service
+### Multi-Hop Recall
 
-### Agent Interaction Pattern
+ClawBrain gives you single-hop retrieval. You orchestrate deeper recall:
 
-1. Agent generates embedding for a memory
-2. Agent stores vector + metadata via `clawbrain add`
-3. Later, agent generates embedding for a query
-4. Agent retrieves top matches via `clawbrain retrieve`
-5. Agent applies thresholds and uses results in its own reasoning
+1. Send a query vector -- get the top match
+2. If the score is too low -- stop, nothing relevant
+3. Combine your original thought + the retrieved memory into new context
+4. Generate a new embedding from the combined context
+5. Query again with the new embedding
+6. Repeat until you've gone deep enough or scores drop off
 
-### Multi-Hop Retrieval (Agent-Side)
+You stay in control of the reasoning. ClawBrain just recalls.
 
-ClawBrain provides single-hop retrieval. The agent orchestrates multi-hop recall:
+## Typical Flow
 
-1. Send query vector to `clawbrain retrieve` -- get top match + score
-2. If score < threshold -- stop, no relevant memory found
-3. Combine original thought + retrieved memory into new context
-4. Generate new embedding from combined context
-5. Send new query to `clawbrain retrieve`
-6. Repeat until max hops, score below threshold, or context limit reached
-
-This keeps reasoning in the agent's hands. ClawBrain just recalls.
-
-### Dreaming (Future)
-
-A planned process that remixes existing memories to create new associations:
-
-- Retrieve random memories from a collection
-- An external agent combines/remixes them into new "dream" memories
-- Store dream memories back with a `source: dream` tag
-- Purpose: surface unexpected connections, consolidate related memories
-
-The dreaming orchestration lives in the agent layer. ClawBrain provides the primitives.
-
-## Development
-
-### Prerequisites
-
-- **Docker** and **Docker Compose** -- the only hard dependency
-  - Qdrant runs as a Docker container
-  - Builds use a Docker Go image (no local Go installation needed)
-- Go 1.25+ (optional, only if you want to run/test locally without Docker)
-
-### Running
-
-```bash
-# Start Qdrant
-docker compose up -d
-
-# Verify Qdrant
-curl http://localhost:6333
-
-# Run connectivity check
-go run ./cmd/clawbrain check
-
-# Stop Qdrant
-docker compose down
-```
-
-### Building
-
-Builds use Docker -- no local Go installation needed.
-
-```bash
-# Cross-compile all platforms (outputs to build/)
-./build.sh
-
-# Or build locally if you have Go installed
-go build -o clawbrain ./cmd/clawbrain
-```
-
-A **pre-commit git hook** runs `build.sh` automatically before every commit, so `build/` always contains up-to-date binaries for all platforms. The hook stages the binaries into the commit.
-
-Cross-compile targets:
-
-| OS | Arch | Binary |
-|---|---|---|
-| Linux | amd64 | `build/clawbrain-linux-amd64` |
-| Linux | arm64 | `build/clawbrain-linux-arm64` |
-| macOS | amd64 (Intel) | `build/clawbrain-darwin-amd64` |
-| macOS | arm64 (Apple Silicon) | `build/clawbrain-darwin-arm64` |
-| Windows | amd64 | `build/clawbrain-windows-amd64.exe` |
-
-All binaries are statically linked (`CGO_ENABLED=0`), built inside a `golang:1.25` Docker container.
-
-### Testing
-
-```bash
-# Store tests (requires Qdrant running)
-go test ./internal/store/ -v
-
-# CLI integration tests (requires Qdrant running)
-go test ./cmd/clawbrain/ -v
-
-# All tests
-go test ./... -v
-```
-
-### Ports
-
-- `6333` -- Qdrant REST API
-- `6334` -- Qdrant gRPC (used by Go client)
-
-## Scaling Direction
-
-Future capabilities (always storage + retrieval, never reasoning):
-
-- Personal agent memory
-- Shared team memory
-- Multi-agent collaborative memory
-- Partitioned memory domains
-- Memory pruning policies
-- Dreaming / memory consolidation (agent-orchestrated)
+1. You have a thought, experience, or piece of knowledge worth remembering
+2. You generate an embedding for it
+3. You store it: `clawbrain add --collection my-memories --vector '[...]' --payload '{"text": "..."}'`
+4. Later, you have a new thought and want to check if you've seen something similar
+5. You generate an embedding for your query
+6. You recall: `clawbrain retrieve --collection my-memories --vector '[...]' --min-score 0.7 --limit 5`
+7. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think
