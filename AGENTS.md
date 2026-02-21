@@ -54,18 +54,17 @@ Global flags go before the command: `clawbrain --host myserver add ...`
 ### Store a Memory
 
 ```bash
-clawbrain add --collection <name> --text 'your text here'
+clawbrain add --text 'your text here'
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--collection` | yes | Namespace for this memory (e.g., your name, a project, a topic) |
 | `--text` | yes | The text to store as a memory |
 | `--payload` | no | Additional metadata as JSON object |
 | `--id` | no | UUID for the memory (auto-generated if omitted) |
 | `--pinned` | no | Pin this memory to prevent automatic forgetting |
 
-ClawBrain embeds your text via Ollama, stores the vector in Qdrant, and keeps the original text in the payload. It automatically adds `created_at` and `last_accessed` timestamps. The collection is auto-created if it doesn't exist yet.
+ClawBrain embeds your text via Ollama, stores the vector in Qdrant, and keeps the original text in the payload. It automatically adds `created_at` and `last_accessed` timestamps.
 
 Pinned memories are immune to TTL-based pruning by `forget`. Use `--pinned` for memories that should persist indefinitely regardless of how often they're accessed.
 
@@ -74,12 +73,11 @@ Pinned memories are immune to TTL-based pruning by `forget`. Use `--pinned` for 
 ### Fetch a Memory by ID
 
 ```bash
-clawbrain get --collection <name> --id <uuid>
+clawbrain get --id <uuid>
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--collection` | yes | Which collection to fetch from |
 | `--id` | yes | UUID of the memory (the one returned by `add`) |
 
 Fetches a single memory directly by its ID. This is a precise lookup, not a search. Useful when you stored a memory and kept the UUID -- you can retrieve it later without needing to reconstruct a query. Updates `last_accessed` on retrieval, just like search does.
@@ -87,12 +85,11 @@ Fetches a single memory directly by its ID. This is a precise lookup, not a sear
 ### Search Memories
 
 ```bash
-clawbrain search --collection <name> --query 'search text' [--limit 5]
+clawbrain search --query 'search text' [--limit 5]
 ```
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
-| `--collection` | yes | -- | Which collection to search |
 | `--query` | yes | -- | Text to search for (semantic search) |
 | `--limit` | no | `1` | Maximum number of memories to return |
 | `--min-score` | no | `0.0` | Minimum similarity score threshold |
@@ -103,30 +100,21 @@ Every memory you recall gets its `last_accessed` timestamp updated -- this keeps
 
 The response includes a `returned` field -- this is the number of results actually returned, which may be less than `--limit` if fewer memories matched or cleared the `--min-score` threshold.
 
-**Important:** Search is approximate nearest neighbor (ANN), not an exhaustive scan. Even with a high `--limit` and `--min-score 0.0`, the results are the nearest neighbors to your query vector -- not all memories in the collection. Different queries surface different subsets. To see the actual total number of memories per collection, use `clawbrain collections`.
+**Important:** Search is approximate nearest neighbor (ANN), not an exhaustive scan. Even with a high `--limit` and `--min-score 0.0`, the results are the nearest neighbors to your query vector -- not all memories stored. Different queries surface different subsets.
 
 **Advanced:** You can pass `--vector` instead of `--query` to search by pre-computed embedding vector. This bypasses Ollama.
 
 ### Forget Stale Memories
 
 ```bash
-clawbrain forget --collection <name> [--ttl 720h]
+clawbrain forget [--ttl 720h]
 ```
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
-| `--collection` | yes | -- | Which collection to prune |
 | `--ttl` | no | `720h` (30 days) | Memories not accessed within this window are deleted |
 
 Memories you never recall fade away -- just like human memory. Every time you retrieve a memory, its `last_accessed` is refreshed. Memories that go untouched past the TTL get pruned.
-
-### List Collections
-
-```bash
-clawbrain collections
-```
-
-Returns all collection names as a JSON array. Useful for discovering what memory namespaces exist.
 
 ### Check Connectivity
 
@@ -138,10 +126,6 @@ Verifies that both Qdrant and Ollama are running and ClawBrain can talk to them.
 
 ## How Memory Works
 
-### Collections
-
-Namespaces. Use them to organize your memories -- per project, per topic, per identity, whatever makes sense for you. Auto-created on first `add`.
-
 ### What You Store
 
 Each memory is text plus optional metadata. When you `add` with `--text`, ClawBrain:
@@ -150,7 +134,7 @@ Each memory is text plus optional metadata. When you `add` with `--text`, ClawBr
 2. Stores the vector + your original text + metadata in Qdrant
 3. Auto-adds `created_at` and `last_accessed` timestamps
 
-You control what goes in the payload -- tags, source info, anything.
+You control what goes in the payload -- source info, anything.
 
 ### Semantic Search
 
@@ -164,7 +148,7 @@ This works because the embedding model (`all-minilm`) maps text to a mathematica
 
 ### Decay
 
-Memories you never recall fade away -- automatically. A background process runs alongside Qdrant and prunes stale memories from every collection on a schedule. You don't need to do anything for this to work.
+Memories you never recall fade away -- automatically. A background process runs alongside Qdrant and prunes stale memories on a schedule. You don't need to do anything for this to work.
 
 How it works:
 
@@ -178,8 +162,8 @@ The more you recall a memory, the longer it lives. Memories you never think abou
 ## Typical Flow
 
 1. You have a thought, experience, or piece of knowledge worth remembering
-2. You store it: `clawbrain add --collection my-memories --text 'the user prefers dark mode'`
+2. You store it: `clawbrain add --text 'the user prefers dark mode'`
 3. Later, you want to check if you've seen something similar
-4. You recall: `clawbrain search --collection my-memories --query 'night theme' --limit 5`
+4. You recall: `clawbrain search --query 'night theme' --limit 5`
 5. The top result is your dark mode memory -- because ClawBrain understands they mean the same thing
 6. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think

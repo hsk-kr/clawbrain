@@ -49,8 +49,6 @@ func main() {
 		runSearch(args[1:])
 	case "forget":
 		runForget(args[1:])
-	case "collections":
-		runCollections()
 	case "check":
 		runCheck()
 	default:
@@ -107,21 +105,14 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  get            Fetch a memory by ID (--id <uuid>)")
 	fmt.Fprintln(os.Stderr, "  search         Search memories (--query 'search text')")
 	fmt.Fprintln(os.Stderr, "  forget         Remove stale memories")
-	fmt.Fprintln(os.Stderr, "  collections    List all collections")
 	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant and Ollama connectivity")
 }
 
 func runGet(args []string) {
 	fs := flag.NewFlagSet("get", flag.ExitOnError)
-	collection := fs.String("collection", "", "Collection to fetch from (required)")
 	id := fs.String("id", "", "UUID of the memory to fetch (required)")
 	fs.Parse(args)
 
-	if *collection == "" {
-		fmt.Fprintln(os.Stderr, "Error: --collection is required")
-		fs.Usage()
-		os.Exit(1)
-	}
 	if *id == "" {
 		fmt.Fprintln(os.Stderr, "Error: --id is required")
 		fs.Usage()
@@ -132,13 +123,13 @@ func runGet(args []string) {
 	defer cancel()
 	defer s.Close()
 
-	result, err := s.Get(ctx, *collection, *id)
+	result, err := s.Get(ctx, *id)
 	if err != nil {
 		exitJSON("error", err.Error())
 	}
 
 	if result == nil {
-		exitJSON("error", fmt.Sprintf("memory %s not found in collection %s", *id, *collection))
+		exitJSON("error", fmt.Sprintf("memory %s not found", *id))
 	}
 
 	outputJSON(map[string]any{
@@ -150,19 +141,12 @@ func runGet(args []string) {
 
 func runAdd(args []string) {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
-	collection := fs.String("collection", "", "Target collection name (required)")
 	text := fs.String("text", "", "Text to store as a memory (default mode)")
 	payloadJSON := fs.String("payload", "", "Additional metadata as JSON object")
 	vectorJSON := fs.String("vector", "", "Embedding vector as JSON array (advanced, overrides text mode)")
 	id := fs.String("id", "", "UUID for the point (auto-generated if omitted)")
 	pinned := fs.Bool("pinned", false, "Pin this memory to prevent automatic forgetting")
 	fs.Parse(args)
-
-	if *collection == "" {
-		fmt.Fprintln(os.Stderr, "Error: --collection is required")
-		fs.Usage()
-		os.Exit(1)
-	}
 
 	// Parse optional payload
 	var payload map[string]any
@@ -189,15 +173,14 @@ func runAdd(args []string) {
 			exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
 		}
 
-		pointID, err := s.Add(ctx, *collection, *id, vector, payload)
+		pointID, err := s.Add(ctx, *id, vector, payload)
 		if err != nil {
 			exitJSON("error", err.Error())
 		}
 
 		outputJSON(map[string]any{
-			"status":     "ok",
-			"id":         pointID,
-			"collection": *collection,
+			"status": "ok",
+			"id":     pointID,
 		})
 	} else if *text != "" {
 		// Default text mode: embed via Ollama, then store
@@ -210,15 +193,14 @@ func runAdd(args []string) {
 		// Store the original text in payload so it can be returned on retrieval
 		payload["text"] = *text
 
-		pointID, err := s.Add(ctx, *collection, *id, vector, payload)
+		pointID, err := s.Add(ctx, *id, vector, payload)
 		if err != nil {
 			exitJSON("error", err.Error())
 		}
 
 		outputJSON(map[string]any{
-			"status":     "ok",
-			"id":         pointID,
-			"collection": *collection,
+			"status": "ok",
+			"id":     pointID,
 		})
 	} else {
 		fmt.Fprintln(os.Stderr, "Error: --text is required (or --vector for advanced mode)")
@@ -229,18 +211,11 @@ func runAdd(args []string) {
 
 func runSearch(args []string) {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
-	collection := fs.String("collection", "", "Collection to search (required)")
 	query := fs.String("query", "", "Text to search for (default mode)")
 	vectorJSON := fs.String("vector", "", "Query embedding as JSON array (advanced, overrides text mode)")
 	minScore := fs.Float64("min-score", 0.0, "Minimum similarity score threshold")
 	limit := fs.Uint64("limit", 1, "Maximum number of results")
 	fs.Parse(args)
-
-	if *collection == "" {
-		fmt.Fprintln(os.Stderr, "Error: --collection is required")
-		fs.Usage()
-		os.Exit(1)
-	}
 
 	s, ctx, cancel := connect()
 	defer cancel()
@@ -253,7 +228,7 @@ func runSearch(args []string) {
 			exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
 		}
 
-		results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit)
+		results, err := s.Retrieve(ctx, vector, float32(*minScore), *limit)
 		if err != nil {
 			exitJSON("error", err.Error())
 		}
@@ -272,7 +247,7 @@ func runSearch(args []string) {
 			exitJSON("error", fmt.Sprintf("embedding failed: %v", err))
 		}
 
-		results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit)
+		results, err := s.Retrieve(ctx, vector, float32(*minScore), *limit)
 		if err != nil {
 			exitJSON("error", err.Error())
 		}
@@ -292,15 +267,8 @@ func runSearch(args []string) {
 
 func runForget(args []string) {
 	fs := flag.NewFlagSet("forget", flag.ExitOnError)
-	collection := fs.String("collection", "", "Collection to prune (required)")
 	ttlStr := fs.String("ttl", "720h", "Duration — memories not accessed within this window are deleted")
 	fs.Parse(args)
-
-	if *collection == "" {
-		fmt.Fprintln(os.Stderr, "Error: --collection is required")
-		fs.Usage()
-		os.Exit(1)
-	}
 
 	ttl, err := time.ParseDuration(*ttlStr)
 	if err != nil {
@@ -311,33 +279,15 @@ func runForget(args []string) {
 	defer cancel()
 	defer s.Close()
 
-	deleted, err := s.Forget(ctx, *collection, ttl)
+	deleted, err := s.Forget(ctx, ttl)
 	if err != nil {
 		exitJSON("error", err.Error())
 	}
 
 	outputJSON(map[string]any{
-		"status":     "ok",
-		"deleted":    deleted,
-		"collection": *collection,
-		"ttl":        ttlStr,
-	})
-}
-
-func runCollections() {
-	s, ctx, cancel := connect()
-	defer cancel()
-	defer s.Close()
-
-	infos, err := s.Collections(ctx)
-	if err != nil {
-		exitJSON("error", err.Error())
-	}
-
-	outputJSON(map[string]any{
-		"status":      "ok",
-		"collections": infos,
-		"count":       len(infos),
+		"status":  "ok",
+		"deleted": deleted,
+		"ttl":     ttlStr,
 	})
 }
 
