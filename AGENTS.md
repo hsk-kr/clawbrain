@@ -1,8 +1,3 @@
----
-name: clawbrain
-description: Guide for AI agents to use ClawBrain, a vector memory engine providing persistent semantic storage and similarity-based retrieval. Use this when working with the ClawBrain codebase or integrating ClawBrain as agent memory infrastructure.
----
-
 # ClawBrain
 
 Vector memory engine for AI agents.
