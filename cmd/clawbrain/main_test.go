@@ -536,6 +536,121 @@ func TestCLICollections(t *testing.T) {
 	}
 }
 
+// --- Get command tests ---
+
+func TestCLIGetMissingFlags(t *testing.T) {
+	binary := buildBinary(t)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no flags", []string{"get"}},
+		{"missing collection", []string{"get", "--id", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}},
+		{"missing id", []string{"get", "--collection", "test"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := runCLI(t, binary, tt.args...)
+			if err == nil {
+				t.Fatal("expected error for missing required flags")
+			}
+		})
+	}
+}
+
+func TestCLIGetByID(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_get_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	customID := "11111111-2222-3333-4444-555555555555"
+
+	// Add a memory with a known ID
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+		"--payload", `{"text": "get me by id", "tag": "test"}`,
+		"--id", customID,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// Get by ID
+	out, err = runCLI(t, binary, "get",
+		"--collection", collection,
+		"--id", customID,
+	)
+	if err != nil {
+		t.Fatalf("get failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+	if result["id"] != customID {
+		t.Errorf("expected id %q, got %v", customID, result["id"])
+	}
+
+	payload, ok := result["payload"].(map[string]any)
+	if !ok {
+		t.Fatal("expected payload to be a map")
+	}
+	if payload["text"] != "get me by id" {
+		t.Errorf("expected text 'get me by id', got %v", payload["text"])
+	}
+	if payload["tag"] != "test" {
+		t.Errorf("expected tag 'test', got %v", payload["tag"])
+	}
+	if payload["created_at"] == nil {
+		t.Error("missing created_at in payload")
+	}
+	if payload["last_accessed"] == nil {
+		t.Error("missing last_accessed in payload")
+	}
+}
+
+func TestCLIGetNotFound(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	collection := "test_cli_get_notfound_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add something so the collection exists
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3, 0.4]",
+		"--payload", `{"text": "placeholder"}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// Try to get a nonexistent ID
+	out, err = runCLI(t, binary, "get",
+		"--collection", collection,
+		"--id", "00000000-0000-0000-0000-000000000000",
+	)
+	if err == nil {
+		t.Fatal("expected error for nonexistent memory")
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "error" {
+		t.Errorf("expected status error, got %v", result["status"])
+	}
+}
+
 // --- Text mode tests (require both Qdrant and Ollama) ---
 
 func TestCLITextAddAndSearch(t *testing.T) {
