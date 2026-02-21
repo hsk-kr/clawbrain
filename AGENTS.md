@@ -63,8 +63,11 @@ clawbrain add --collection <name> --text 'your text here'
 | `--text` | yes | The text to store as a memory |
 | `--payload` | no | Additional metadata as JSON object |
 | `--id` | no | UUID for the memory (auto-generated if omitted) |
+| `--pinned` | no | Pin this memory to prevent automatic forgetting |
 
 ClawBrain embeds your text via Ollama, stores the vector in Qdrant, and keeps the original text in the payload. It automatically adds `created_at` and `last_accessed` timestamps. The collection is auto-created if it doesn't exist yet.
+
+Pinned memories are immune to TTL-based pruning by `forget`. Use `--pinned` for memories that should persist indefinitely regardless of how often they're accessed.
 
 **Advanced:** You can also pass `--vector` with a JSON array to store pre-computed embedding vectors directly. When using `--vector`, the `--payload` flag carries your metadata. This bypasses Ollama entirely.
 

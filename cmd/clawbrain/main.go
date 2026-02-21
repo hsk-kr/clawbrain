@@ -155,6 +155,7 @@ func runAdd(args []string) {
 	payloadJSON := fs.String("payload", "", "Additional metadata as JSON object")
 	vectorJSON := fs.String("vector", "", "Embedding vector as JSON array (advanced, overrides text mode)")
 	id := fs.String("id", "", "UUID for the point (auto-generated if omitted)")
+	pinned := fs.Bool("pinned", false, "Pin this memory to prevent automatic forgetting")
 	fs.Parse(args)
 
 	if *collection == "" {
@@ -171,6 +172,10 @@ func runAdd(args []string) {
 		}
 	} else {
 		payload = make(map[string]any)
+	}
+
+	if *pinned {
+		payload["pinned"] = true
 	}
 
 	s, ctx, cancel := connect()

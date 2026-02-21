@@ -235,6 +235,9 @@ func (s *Store) Forget(ctx context.Context, collection string, ttl time.Duration
 				Lt: timestamppb.New(cutoff),
 			}),
 		},
+		MustNot: []*qdrant.Condition{
+			qdrant.NewMatchBool("pinned", true),
+		},
 	}
 
 	// Scroll to find all stale points

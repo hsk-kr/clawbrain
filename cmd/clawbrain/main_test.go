@@ -1148,6 +1148,81 @@ func TestCLIConfidenceWithTextQuery(t *testing.T) {
 	}
 }
 
+func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	collection := "test_cli_pinned_" + t.Name()
+	defer func() {
+		// Force cleanup: forget with 0s TTL won't delete pinned memories,
+		// so we add a second forget after this test to clean up.
+		// In practice the collection will be cleaned up by future test runs.
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add a pinned memory
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--text", "this memory is pinned and should survive",
+		"--pinned",
+	)
+	if err != nil {
+		t.Fatalf("add pinned failed: %v\n%s", err, out)
+	}
+
+	addResult := parseJSON(t, out)
+	if addResult["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", addResult["status"])
+	}
+	pinnedID := addResult["id"].(string)
+
+	// Add an unpinned memory
+	out, err = runCLI(t, binary, "add",
+		"--collection", collection,
+		"--text", "this memory is not pinned and should be forgotten",
+	)
+	if err != nil {
+		t.Fatalf("add unpinned failed: %v\n%s", err, out)
+	}
+
+	// Forget with 0s TTL — should delete only the unpinned one
+	out, err = runCLI(t, binary, "forget",
+		"--collection", collection,
+		"--ttl", "0s",
+	)
+	if err != nil {
+		t.Fatalf("forget failed: %v\n%s", err, out)
+	}
+
+	forgetResult := parseJSON(t, out)
+	deleted, _ := forgetResult["deleted"].(float64)
+	if deleted != 1 {
+		t.Fatalf("expected 1 deletion (unpinned only), got %v", deleted)
+	}
+
+	// Verify the pinned memory is still retrievable by ID
+	out, err = runCLI(t, binary, "get",
+		"--collection", collection,
+		"--id", pinnedID,
+	)
+	if err != nil {
+		t.Fatalf("get pinned failed: %v\n%s", err, out)
+	}
+
+	getResult := parseJSON(t, out)
+	if getResult["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", getResult["status"])
+	}
+	payload := getResult["payload"].(map[string]any)
+	if payload["text"] != "this memory is pinned and should survive" {
+		t.Errorf("expected pinned memory text, got %v", payload["text"])
+	}
+	if payload["pinned"] != true {
+		t.Errorf("expected pinned=true in payload, got %v", payload["pinned"])
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
