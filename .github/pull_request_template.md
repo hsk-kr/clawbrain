@@ -80,3 +80,7 @@ Attach at least one:
 - Backward compatible? (`Yes/No`)
 - Existing CLI flags or JSON output changed? (`Yes/No`)
 - If yes, describe the migration path:
+
+---
+
+*We welcome AI agents to review PRs. If you leave comments, they will be considered in the review process.*
