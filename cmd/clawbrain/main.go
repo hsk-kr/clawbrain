@@ -8,14 +8,27 @@ import (
 	"os"
 	"time"
 
+	"github.com/hsk-coder/clawbrain/internal/ollama"
 	"github.com/hsk-coder/clawbrain/internal/store"
 )
 
 // Global connection settings, set by parseGlobals.
 var (
-	globalHost = "localhost"
-	globalPort = 6334
+	globalHost      = "localhost"
+	globalPort      = 6334
+	globalOllamaURL = "http://localhost:11434"
+	globalModel     = "all-minilm"
 )
+
+func init() {
+	// Environment variables override defaults (before flags override both).
+	if v := os.Getenv("CLAWBRAIN_OLLAMA_URL"); v != "" {
+		globalOllamaURL = v
+	}
+	if v := os.Getenv("CLAWBRAIN_MODEL"); v != "" {
+		globalModel = v
+	}
+}
 
 func main() {
 	args := parseGlobals(os.Args[1:])
@@ -45,8 +58,8 @@ func main() {
 	}
 }
 
-// parseGlobals extracts --host and --port from the argument list and
-// returns the remaining arguments (command + subcommand flags).
+// parseGlobals extracts --host, --port, --ollama-url, and --model from the
+// argument list and returns the remaining arguments (command + subcommand flags).
 func parseGlobals(args []string) []string {
 	var remaining []string
 	for i := 0; i < len(args); i++ {
@@ -61,6 +74,16 @@ func parseGlobals(args []string) []string {
 				fmt.Sscanf(args[i+1], "%d", &globalPort)
 				i++
 			}
+		case "--ollama-url":
+			if i+1 < len(args) {
+				globalOllamaURL = args[i+1]
+				i++
+			}
+		case "--model":
+			if i+1 < len(args) {
+				globalModel = args[i+1]
+				i++
+			}
 		default:
 			remaining = append(remaining, args[i])
 		}
@@ -69,95 +92,157 @@ func parseGlobals(args []string) []string {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: clawbrain [--host HOST] [--port PORT] <command> [flags]")
+	fmt.Fprintln(os.Stderr, "Usage: clawbrain [--host HOST] [--port PORT] [--ollama-url URL] [--model MODEL] <command> [flags]")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Global flags:")
-	fmt.Fprintln(os.Stderr, "  --host         Qdrant host (default: localhost)")
+	fmt.Fprintln(os.Stderr, "  --host         Qdrant host (default: localhost, env: CLAWBRAIN_HOST)")
 	fmt.Fprintln(os.Stderr, "  --port         Qdrant gRPC port (default: 6334)")
+	fmt.Fprintln(os.Stderr, "  --ollama-url   Ollama base URL (default: http://localhost:11434, env: CLAWBRAIN_OLLAMA_URL)")
+	fmt.Fprintln(os.Stderr, "  --model        Embedding model (default: all-minilm, env: CLAWBRAIN_MODEL)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  add            Store a memory")
-	fmt.Fprintln(os.Stderr, "  retrieve       Query similar memories")
+	fmt.Fprintln(os.Stderr, "  add            Store a memory (--text 'your text here')")
+	fmt.Fprintln(os.Stderr, "  retrieve       Search memories (--query 'search text')")
 	fmt.Fprintln(os.Stderr, "  forget         Remove stale memories")
 	fmt.Fprintln(os.Stderr, "  collections    List all collections")
-	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant connectivity")
+	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant and Ollama connectivity")
 }
 
 func runAdd(args []string) {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	collection := fs.String("collection", "", "Target collection name (required)")
-	vectorJSON := fs.String("vector", "", "Embedding vector as JSON array (required)")
-	payloadJSON := fs.String("payload", "", "Metadata as JSON object (required)")
+	text := fs.String("text", "", "Text to store as a memory (default mode)")
+	payloadJSON := fs.String("payload", "", "Additional metadata as JSON object")
+	vectorJSON := fs.String("vector", "", "Embedding vector as JSON array (advanced, overrides text mode)")
 	id := fs.String("id", "", "UUID for the point (auto-generated if omitted)")
 	fs.Parse(args)
 
-	if *collection == "" || *vectorJSON == "" || *payloadJSON == "" {
-		fmt.Fprintln(os.Stderr, "Error: --collection, --vector, and --payload are required")
+	if *collection == "" {
+		fmt.Fprintln(os.Stderr, "Error: --collection is required")
 		fs.Usage()
 		os.Exit(1)
 	}
 
-	var vector []float32
-	if err := json.Unmarshal([]byte(*vectorJSON), &vector); err != nil {
-		exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
-	}
-
+	// Parse optional payload
 	var payload map[string]any
-	if err := json.Unmarshal([]byte(*payloadJSON), &payload); err != nil {
-		exitJSON("error", fmt.Sprintf("invalid payload JSON: %v", err))
+	if *payloadJSON != "" {
+		if err := json.Unmarshal([]byte(*payloadJSON), &payload); err != nil {
+			exitJSON("error", fmt.Sprintf("invalid payload JSON: %v", err))
+		}
+	} else {
+		payload = make(map[string]any)
 	}
 
 	s, ctx, cancel := connect()
 	defer cancel()
 	defer s.Close()
 
-	pointID, err := s.Add(ctx, *collection, *id, vector, payload)
-	if err != nil {
-		exitJSON("error", err.Error())
-	}
+	if *vectorJSON != "" {
+		// Advanced vector mode: user provides their own embedding
+		var vector []float32
+		if err := json.Unmarshal([]byte(*vectorJSON), &vector); err != nil {
+			exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
+		}
 
-	outputJSON(map[string]any{
-		"status":     "ok",
-		"id":         pointID,
-		"collection": *collection,
-	})
+		pointID, err := s.Add(ctx, *collection, *id, vector, payload)
+		if err != nil {
+			exitJSON("error", err.Error())
+		}
+
+		outputJSON(map[string]any{
+			"status":     "ok",
+			"id":         pointID,
+			"collection": *collection,
+		})
+	} else if *text != "" {
+		// Default text mode: embed via Ollama, then store
+		oc := ollama.New(globalOllamaURL)
+		vector, err := oc.Embed(ctx, globalModel, *text)
+		if err != nil {
+			exitJSON("error", fmt.Sprintf("embedding failed: %v", err))
+		}
+
+		// Store the original text in payload so it can be returned on retrieval
+		payload["text"] = *text
+
+		pointID, err := s.Add(ctx, *collection, *id, vector, payload)
+		if err != nil {
+			exitJSON("error", err.Error())
+		}
+
+		outputJSON(map[string]any{
+			"status":     "ok",
+			"id":         pointID,
+			"collection": *collection,
+		})
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: --text is required (or --vector for advanced mode)")
+		fs.Usage()
+		os.Exit(1)
+	}
 }
 
 func runRetrieve(args []string) {
 	fs := flag.NewFlagSet("retrieve", flag.ExitOnError)
 	collection := fs.String("collection", "", "Collection to search (required)")
-	vectorJSON := fs.String("vector", "", "Query embedding as JSON array (required)")
+	query := fs.String("query", "", "Text to search for (default mode)")
+	vectorJSON := fs.String("vector", "", "Query embedding as JSON array (advanced, overrides text mode)")
 	minScore := fs.Float64("min-score", 0.0, "Minimum similarity score threshold")
 	limit := fs.Uint64("limit", 1, "Maximum number of results")
-	recencyBoost := fs.Float64("recency-boost", 0.0, "Recency boost weight (0.0 = off, higher = stronger short-term memory effect)")
+	recencyBoost := fs.Float64("recency-boost", 0.0, "Recency boost weight (0 = off)")
 	recencyScale := fs.Float64("recency-scale", 3600, "Seconds until recency boost decays to half strength")
 	fs.Parse(args)
 
-	if *collection == "" || *vectorJSON == "" {
-		fmt.Fprintln(os.Stderr, "Error: --collection and --vector are required")
+	if *collection == "" {
+		fmt.Fprintln(os.Stderr, "Error: --collection is required")
 		fs.Usage()
 		os.Exit(1)
-	}
-
-	var vector []float32
-	if err := json.Unmarshal([]byte(*vectorJSON), &vector); err != nil {
-		exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
 	}
 
 	s, ctx, cancel := connect()
 	defer cancel()
 	defer s.Close()
 
-	results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit, float32(*recencyBoost), float32(*recencyScale))
-	if err != nil {
-		exitJSON("error", err.Error())
-	}
+	if *vectorJSON != "" {
+		// Advanced vector mode
+		var vector []float32
+		if err := json.Unmarshal([]byte(*vectorJSON), &vector); err != nil {
+			exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
+		}
 
-	outputJSON(map[string]any{
-		"status":  "ok",
-		"results": results,
-		"count":   len(results),
-	})
+		results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit, float32(*recencyBoost), float32(*recencyScale))
+		if err != nil {
+			exitJSON("error", err.Error())
+		}
+
+		outputJSON(map[string]any{
+			"status":  "ok",
+			"results": results,
+			"count":   len(results),
+		})
+	} else if *query != "" {
+		// Default text mode: embed query via Ollama, then search
+		oc := ollama.New(globalOllamaURL)
+		vector, err := oc.Embed(ctx, globalModel, *query)
+		if err != nil {
+			exitJSON("error", fmt.Sprintf("embedding failed: %v", err))
+		}
+
+		results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit, float32(*recencyBoost), float32(*recencyScale))
+		if err != nil {
+			exitJSON("error", err.Error())
+		}
+
+		outputJSON(map[string]any{
+			"status":  "ok",
+			"results": results,
+			"count":   len(results),
+		})
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: --query is required (or --vector for advanced mode)")
+		fs.Usage()
+		os.Exit(1)
+	}
 }
 
 func runForget(args []string) {
@@ -216,13 +301,20 @@ func runCheck() {
 	defer cancel()
 	defer s.Close()
 
+	// Check Qdrant
 	if err := s.Check(ctx); err != nil {
-		exitJSON("error", err.Error())
+		exitJSON("error", fmt.Sprintf("qdrant: %v", err))
+	}
+
+	// Check Ollama
+	oc := ollama.New(globalOllamaURL)
+	if err := oc.Health(ctx); err != nil {
+		exitJSON("error", fmt.Sprintf("ollama: %v", err))
 	}
 
 	outputJSON(map[string]any{
 		"status":  "ok",
-		"message": "ClawBrain stack verified",
+		"message": "Qdrant and Ollama verified",
 	})
 }
 

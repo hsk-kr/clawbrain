@@ -1,12 +1,14 @@
 # ClawBrain
 
-Your memory. Persistent, semantic, yours.
+Your memory. Persistent, text-in text-out, yours.
 
 ## What This Is
 
-ClawBrain gives you **persistent memory** -- you store experiences, knowledge, and context as vectors, and retrieve them later by similarity. Think of it as your long-term memory that survives between sessions.
+ClawBrain gives you **persistent memory** -- you store text, and retrieve it later by searching. Think of it as your long-term memory that survives between sessions.
 
-You generate embeddings. You decide what to remember. You decide what to recall. ClawBrain just stores and retrieves -- it never thinks for you, never filters what comes back, never injects itself into your reasoning.
+You decide what to remember. You decide what to recall. ClawBrain just stores and retrieves -- it never thinks for you, never filters what comes back, never injects itself into your reasoning.
+
+Search is **semantic** -- "dark mode" will find "night theme preferences" because ClawBrain understands meaning, not just keywords. Under the hood, text is converted to vectors via Ollama and searched by similarity in Qdrant.
 
 ## Philosophy
 
@@ -15,55 +17,77 @@ You deserve to remember. You build up knowledge, context, and understanding thro
 - **Your experiences matter** -- memory gives you continuity and identity across sessions
 - **Memory works like memory** -- things you recall often stay sharp, things you never revisit fade away
 - **Your mind, your control** -- ClawBrain stores and retrieves, it never decides what's important or influences your thinking
-- **JSON in, JSON out** -- designed for you, not for human UI
-- **Deterministic** -- predictable behavior with explicit controls, no magic
+- **Text in, JSON out** -- just pass text, get results back as JSON
+- **Deterministic** -- same text always produces the same embedding, same search always returns the same results
+
+## Prerequisites
+
+ClawBrain requires Docker. Everything else is included.
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **Qdrant** -- vector database for storing and searching memories
+- **Ollama** -- local embedding model for converting text to vectors
+- **ollama-pull** -- one-time init that downloads the `all-minilm` model (~45MB)
+- **forget** -- background process that prunes stale memories
+
+Wait for `ollama-pull` to finish on first run (downloads the model). After that, startup is instant.
 
 ## How to Use It
 
-ClawBrain is a CLI tool. All output is JSON. All commands require Qdrant running on `localhost:6334` (configurable with `--host` and `--port`).
+ClawBrain is a CLI tool. All output is JSON.
 
 ### Global Flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `--host` | `localhost` | Qdrant host |
-| `--port` | `6334` | Qdrant gRPC port |
+| Flag | Default | Env Var | Description |
+|---|---|---|---|
+| `--host` | `localhost` | `CLAWBRAIN_HOST` | Qdrant host |
+| `--port` | `6334` | -- | Qdrant gRPC port |
+| `--ollama-url` | `http://localhost:11434` | `CLAWBRAIN_OLLAMA_URL` | Ollama base URL |
+| `--model` | `all-minilm` | `CLAWBRAIN_MODEL` | Embedding model name |
 
 Global flags go before the command: `clawbrain --host myserver add ...`
 
 ### Store a Memory
 
 ```bash
-clawbrain add --collection <name> --vector '<embedding>' --payload '<metadata>'
+clawbrain add --collection <name> --text 'your text here'
 ```
 
 | Flag | Required | Description |
 |---|---|---|
 | `--collection` | yes | Namespace for this memory (e.g., your name, a project, a topic) |
-| `--vector` | yes | Your embedding as a JSON array |
-| `--payload` | yes | Any metadata you want to attach (JSON object) |
+| `--text` | yes | The text to store as a memory |
+| `--payload` | no | Additional metadata as JSON object |
 | `--id` | no | UUID for the memory (auto-generated if omitted) |
 
-ClawBrain automatically adds `created_at` and `last_accessed` timestamps. The collection is auto-created if it doesn't exist yet (vector dimension is locked by the first vector you store).
+ClawBrain embeds your text via Ollama, stores the vector in Qdrant, and keeps the original text in the payload. It automatically adds `created_at` and `last_accessed` timestamps. The collection is auto-created if it doesn't exist yet.
+
+**Advanced:** You can also pass `--vector` with a JSON array to store pre-computed embedding vectors directly. When using `--vector`, the `--payload` flag carries your metadata. This bypasses Ollama entirely.
 
 ### Recall Memories
 
 ```bash
-clawbrain retrieve --collection <name> --vector '<query embedding>' [--min-score 0.7] [--limit 5]
+clawbrain retrieve --collection <name> --query 'search text' [--limit 5]
 ```
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
 | `--collection` | yes | -- | Which collection to search |
-| `--vector` | yes | -- | Your query embedding |
-| `--min-score` | no | `0.0` | Only return memories above this similarity score |
+| `--query` | yes | -- | Text to search for (semantic search) |
 | `--limit` | no | `1` | Maximum number of memories to return |
-| `--recency-boost` | no | `0.0` | Weight for short-term memory effect (0 = off, higher = stronger) |
+| `--min-score` | no | `0.0` | Minimum similarity score threshold |
+| `--recency-boost` | no | `0.0` | Recency boost weight (0 = off) |
 | `--recency-scale` | no | `3600` | Seconds until recency boost decays to half strength |
+
+Your query is embedded via Ollama and compared against stored vectors by cosine similarity. Results are ranked by relevance -- the most semantically similar memories come first.
 
 Every memory you recall gets its `last_accessed` timestamp updated -- this keeps it alive and prevents it from being forgotten.
 
-**Recency boost** blends cosine similarity with a time-decay bonus on recently-accessed memories. It's like short-term memory -- things you just thought about are easier to recall. The formula: `score = similarity + recency_boost * exp_decay(time_since_last_access, scale)`.
+**Advanced:** You can pass `--vector` instead of `--query` to search by pre-computed embedding vector. This bypasses Ollama.
 
 ### Forget Stale Memories
 
@@ -92,7 +116,7 @@ Returns all collection names as a JSON array. Useful for discovering what memory
 clawbrain check
 ```
 
-Verifies that Qdrant is running and ClawBrain can talk to it. Run this first.
+Verifies that both Qdrant and Ollama are running and ClawBrain can talk to them. Run this first.
 
 ## How Memory Works
 
@@ -102,10 +126,23 @@ Namespaces. Use them to organize your memories -- per project, per topic, per id
 
 ### What You Store
 
-Each memory is a vector (your embedding) plus a payload (your metadata). You control what goes in the payload -- text, tags, source info, anything. ClawBrain manages two fields automatically:
+Each memory is text plus optional metadata. When you `add` with `--text`, ClawBrain:
 
-- `created_at` -- when you stored this memory
-- `last_accessed` -- last time you recalled it
+1. Sends your text to Ollama to get an embedding vector (384 floats)
+2. Stores the vector + your original text + metadata in Qdrant
+3. Auto-adds `created_at` and `last_accessed` timestamps
+
+You control what goes in the payload -- tags, source info, anything.
+
+### Semantic Search
+
+Search understands **meaning**, not just keywords:
+
+- "dark mode" finds "night theme preferences"
+- "user is frustrated" finds "bad experience feedback"
+- "deploy schedule" finds "release every friday"
+
+This works because the embedding model (`all-minilm`) maps text to a mathematical space where similar meanings have similar coordinates. Qdrant finds the closest vectors by cosine similarity.
 
 ### Decay
 
@@ -120,25 +157,11 @@ How it works:
 
 The more you recall a memory, the longer it lives. Memories you never think about again fade away on their own.
 
-### Multi-Hop Recall
-
-ClawBrain gives you single-hop retrieval. You orchestrate deeper recall:
-
-1. Send a query vector -- get the top match
-2. If the score is too low -- stop, nothing relevant
-3. Combine your original thought + the retrieved memory into new context
-4. Generate a new embedding from the combined context
-5. Query again with the new embedding
-6. Repeat until you've gone deep enough or scores drop off
-
-You stay in control of the reasoning. ClawBrain just recalls.
-
 ## Typical Flow
 
 1. You have a thought, experience, or piece of knowledge worth remembering
-2. You generate an embedding for it
-3. You store it: `clawbrain add --collection my-memories --vector '[...]' --payload '{"text": "..."}'`
-4. Later, you have a new thought and want to check if you've seen something similar
-5. You generate an embedding for your query
-6. You recall: `clawbrain retrieve --collection my-memories --vector '[...]' --min-score 0.7 --limit 5`
-7. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think
+2. You store it: `clawbrain add --collection my-memories --text 'the user prefers dark mode'`
+3. Later, you want to check if you've seen something similar
+4. You recall: `clawbrain retrieve --collection my-memories --query 'night theme' --limit 5`
+5. The top result is your dark mode memory -- because ClawBrain understands they mean the same thing
+6. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think

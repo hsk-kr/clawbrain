@@ -7,6 +7,28 @@ services:
     volumes:
       - ./qdrant_storage:/qdrant/storage
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["ollama", "pull", "all-minilm"]
+    environment:
+      - OLLAMA_HOST=ollama
+    restart: "no"
+
   forget:
     build:
       context: .
@@ -18,3 +40,6 @@ services:
       - CLAWBRAIN_TTL=720h
       - CLAWBRAIN_INTERVAL=3600
     restart: unless-stopped
+
+volumes:
+  ollama_data:
