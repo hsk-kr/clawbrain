@@ -2,6 +2,7 @@
 qdrant_storage/
 
 # Go binaries
+/clawbrain
 *.exe
 *.exe~
 *.dll
