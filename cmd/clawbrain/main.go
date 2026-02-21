@@ -173,6 +173,16 @@ func runAdd(args []string) {
 			exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
 		}
 
+		// Require text field in payload — a memory without text is a ghost
+		// that pollutes retrieval results with no displayable content.
+		t, ok := payload["text"]
+		if !ok || t == nil {
+			exitJSON("error", "payload must contain a non-empty \"text\" field")
+		}
+		if s, isStr := t.(string); !isStr || s == "" {
+			exitJSON("error", "payload must contain a non-empty \"text\" field")
+		}
+
 		pointID, err := s.Add(ctx, *id, vector, payload)
 		if err != nil {
 			exitJSON("error", err.Error())

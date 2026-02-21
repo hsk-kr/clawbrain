@@ -146,6 +146,58 @@ func TestCLIAddMissingFlags(t *testing.T) {
 	}
 }
 
+func TestCLIAddVectorRejectsEmptyPayload(t *testing.T) {
+	binary := buildBinary(t)
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantMsg string
+	}{
+		{
+			"no payload flag",
+			[]string{"add", "--vector", "[0.1, 0.2, 0.3, 0.4]"},
+			"payload must contain a non-empty \"text\" field",
+		},
+		{
+			"empty payload object",
+			[]string{"add", "--vector", "[0.1, 0.2, 0.3, 0.4]", "--payload", "{}"},
+			"payload must contain a non-empty \"text\" field",
+		},
+		{
+			"payload with empty text",
+			[]string{"add", "--vector", "[0.1, 0.2, 0.3, 0.4]", "--payload", `{"text": ""}`},
+			"payload must contain a non-empty \"text\" field",
+		},
+		{
+			"payload with null text",
+			[]string{"add", "--vector", "[0.1, 0.2, 0.3, 0.4]", "--payload", `{"text": null}`},
+			"payload must contain a non-empty \"text\" field",
+		},
+		{
+			"payload with other fields but no text",
+			[]string{"add", "--vector", "[0.1, 0.2, 0.3, 0.4]", "--payload", `{"source": "test"}`},
+			"payload must contain a non-empty \"text\" field",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := runCLI(t, binary, tt.args...)
+			if err == nil {
+				t.Fatal("expected error for missing text in payload")
+			}
+			result := parseJSON(t, out)
+			if result["status"] != "error" {
+				t.Errorf("expected status error, got %v", result["status"])
+			}
+			if msg, ok := result["message"].(string); !ok || msg != tt.wantMsg {
+				t.Errorf("expected message %q, got %v", tt.wantMsg, result["message"])
+			}
+		})
+	}
+}
+
 func TestCLIAddAndSearch(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
