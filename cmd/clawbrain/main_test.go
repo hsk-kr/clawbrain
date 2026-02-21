@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/hsk-coder/clawbrain/internal/store"
 )
 
 // buildBinary builds the clawbrain CLI and returns the path to the binary.
@@ -63,6 +66,27 @@ func skipIfNoOllama(t *testing.T) {
 	resp.Body.Close()
 }
 
+// cleanupMemories deletes the memories collection entirely via the store.
+// This ensures a clean slate between tests that may use different vector dimensions.
+func cleanupMemories(t *testing.T) {
+	t.Helper()
+	s, err := store.New("localhost", 6334)
+	if err != nil {
+		return
+	}
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Forget with 0s TTL to delete all unpinned points, then rely on
+	// the collection being reusable. For full cleanup (including dimension
+	// changes), we delete the collection entirely.
+	s.Forget(ctx, 0)
+	// Delete the collection if it exists — the store will recreate it on next Add.
+	s.DeleteCollection(ctx)
+}
+
 func TestCLINoArgs(t *testing.T) {
 	binary := buildBinary(t)
 	out, err := runCLI(t, binary)
@@ -109,9 +133,7 @@ func TestCLIAddMissingFlags(t *testing.T) {
 		args []string
 	}{
 		{"no flags", []string{"add"}},
-		{"missing collection", []string{"add", "--text", "hello"}},
-		{"missing text and vector", []string{"add", "--collection", "test"}},
-		{"missing collection with vector", []string{"add", "--vector", "[0.1]", "--payload", "{}"}},
+		{"missing text and vector", []string{"add", "--payload", "{}"}},
 	}
 
 	for _, tt := range tests {
@@ -128,16 +150,11 @@ func TestCLIAddAndSearch(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_add_search_" + t.Name()
-
-	// Cleanup at the end by forgetting everything
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	// Cleanup at the end
+	defer cleanupMemories(t)
 
 	// Add a memory
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--payload", `{"text": "cli test memory"}`,
 	)
@@ -155,7 +172,6 @@ func TestCLIAddAndSearch(t *testing.T) {
 
 	// Search for it
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--min-score", "0.9",
 	)
@@ -167,9 +183,9 @@ func TestCLIAddAndSearch(t *testing.T) {
 	if searchResult["status"] != "ok" {
 		t.Fatalf("expected status ok, got %v", searchResult["status"])
 	}
-	count, ok := searchResult["count"].(float64)
-	if !ok || count < 1 {
-		t.Fatalf("expected at least 1 result, got %v", searchResult["count"])
+	returned, ok := searchResult["returned"].(float64)
+	if !ok || returned < 1 {
+		t.Fatalf("expected at least 1 result, got %v", searchResult["returned"])
 	}
 }
 
@@ -177,15 +193,10 @@ func TestCLIAddWithCustomID(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_custom_id_" + t.Name()
-
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	customID := "12345678-1234-1234-1234-123456789abc"
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.5, 0.5, 0.5, 0.5]",
 		"--payload", `{"text": "custom id"}`,
 		"--id", customID,
@@ -208,9 +219,7 @@ func TestCLISearchMissingFlags(t *testing.T) {
 		args []string
 	}{
 		{"no flags", []string{"search"}},
-		{"missing query and vector", []string{"search", "--collection", "test"}},
-		{"missing collection", []string{"search", "--query", "hello"}},
-		{"missing collection with vector", []string{"search", "--vector", "[0.1]"}},
+		{"missing query and vector", []string{"search", "--limit", "5"}},
 	}
 
 	for _, tt := range tests {
@@ -227,11 +236,8 @@ func TestCLIForget(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_forget_" + t.Name()
-
 	// Add a memory
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--payload", `{"text": "will be forgotten"}`,
 	)
@@ -241,7 +247,6 @@ func TestCLIForget(t *testing.T) {
 
 	// Forget with 0s TTL — should delete everything
 	out, err = runCLI(t, binary, "forget",
-		"--collection", collection,
 		"--ttl", "0s",
 	)
 	if err != nil {
@@ -257,9 +262,8 @@ func TestCLIForget(t *testing.T) {
 		t.Fatalf("expected at least 1 deletion, got %v", result["deleted"])
 	}
 
-	// Verify collection is empty via search
+	// Verify empty via search
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--limit", "10",
 	)
@@ -268,9 +272,9 @@ func TestCLIForget(t *testing.T) {
 	}
 
 	searchResult := parseJSON(t, out)
-	count, _ := searchResult["count"].(float64)
-	if count != 0 {
-		t.Errorf("expected 0 results after forget, got %v", count)
+	returned, _ := searchResult["returned"].(float64)
+	if returned != 0 {
+		t.Errorf("expected 0 results after forget, got %v", returned)
 	}
 }
 
@@ -278,14 +282,10 @@ func TestCLIAddSearchPreservesPayload(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_payload_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add with rich payload
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--payload", `{"text": "preserved", "count": 42, "active": true}`,
 	)
@@ -295,7 +295,6 @@ func TestCLIAddSearchPreservesPayload(t *testing.T) {
 
 	// Search and check payload fields
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--min-score", "0.9",
 	)
@@ -333,7 +332,6 @@ func TestCLIForgetInvalidTTL(t *testing.T) {
 	binary := buildBinary(t)
 
 	out, err := runCLI(t, binary, "forget",
-		"--collection", "test",
 		"--ttl", "not-a-duration",
 	)
 	if err == nil {
@@ -345,19 +343,10 @@ func TestCLIForgetInvalidTTL(t *testing.T) {
 	}
 }
 
-func TestCLIForgetMissingCollection(t *testing.T) {
-	binary := buildBinary(t)
-	_, err := runCLI(t, binary, "forget")
-	if err == nil {
-		t.Fatal("expected error for missing --collection")
-	}
-}
-
 func TestCLIInvalidVectorJSON(t *testing.T) {
 	binary := buildBinary(t)
 
 	out, err := runCLI(t, binary, "add",
-		"--collection", "test",
 		"--vector", "not json",
 		"--payload", "{}",
 	)
@@ -374,7 +363,6 @@ func TestCLIInvalidPayloadJSON(t *testing.T) {
 	binary := buildBinary(t)
 
 	out, err := runCLI(t, binary, "add",
-		"--collection", "test",
 		"--vector", "[0.1]",
 		"--payload", "not json",
 	)
@@ -384,53 +372,6 @@ func TestCLIInvalidPayloadJSON(t *testing.T) {
 	result := parseJSON(t, out)
 	if result["status"] != "error" {
 		t.Errorf("expected status error, got %v", result["status"])
-	}
-}
-
-func TestCLICollections(t *testing.T) {
-	binary := buildBinary(t)
-	skipIfNoQdrant(t, binary)
-
-	// Add a memory so there's at least one collection
-	collection := "test_cli_collections_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
-
-	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
-		"--vector", "[0.1, 0.2, 0.3]",
-		"--payload", `{"text": "collections test"}`,
-	)
-	if err != nil {
-		t.Fatalf("add failed: %v\n%s", err, out)
-	}
-
-	// List collections
-	out, err = runCLI(t, binary, "collections")
-	if err != nil {
-		t.Fatalf("collections failed: %v\n%s", err, out)
-	}
-
-	result := parseJSON(t, out)
-	if result["status"] != "ok" {
-		t.Fatalf("expected status ok, got %v", result["status"])
-	}
-
-	collections, ok := result["collections"].([]any)
-	if !ok {
-		t.Fatal("expected collections to be an array")
-	}
-
-	found := false
-	for _, c := range collections {
-		if c == collection {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected %q in collections list, got %v", collection, collections)
 	}
 }
 
@@ -444,8 +385,7 @@ func TestCLIGetMissingFlags(t *testing.T) {
 		args []string
 	}{
 		{"no flags", []string{"get"}},
-		{"missing collection", []string{"get", "--id", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}},
-		{"missing id", []string{"get", "--collection", "test"}},
+		{"missing id", []string{"get"}},
 	}
 
 	for _, tt := range tests {
@@ -462,16 +402,12 @@ func TestCLIGetByID(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_get_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	customID := "11111111-2222-3333-4444-555555555555"
 
 	// Add a memory with a known ID
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--payload", `{"text": "get me by id", "tag": "test"}`,
 		"--id", customID,
@@ -482,7 +418,6 @@ func TestCLIGetByID(t *testing.T) {
 
 	// Get by ID
 	out, err = runCLI(t, binary, "get",
-		"--collection", collection,
 		"--id", customID,
 	)
 	if err != nil {
@@ -519,14 +454,10 @@ func TestCLIGetNotFound(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_get_notfound_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add something so the collection exists
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--payload", `{"text": "placeholder"}`,
 	)
@@ -536,7 +467,6 @@ func TestCLIGetNotFound(t *testing.T) {
 
 	// Try to get a nonexistent ID
 	out, err = runCLI(t, binary, "get",
-		"--collection", collection,
 		"--id", "00000000-0000-0000-0000-000000000000",
 	)
 	if err == nil {
@@ -556,14 +486,10 @@ func TestCLITextAddAndSearch(t *testing.T) {
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
 
-	collection := "test_cli_text_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add a text memory (embedding happens via Ollama)
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--text", "the user prefers dark mode for coding",
 	)
 	if err != nil {
@@ -580,7 +506,6 @@ func TestCLITextAddAndSearch(t *testing.T) {
 
 	// Search by text query (query is also embedded via Ollama)
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--query", "dark mode",
 		"--limit", "5",
 	)
@@ -592,9 +517,9 @@ func TestCLITextAddAndSearch(t *testing.T) {
 	if searchResult["status"] != "ok" {
 		t.Fatalf("expected status ok, got %v", searchResult["status"])
 	}
-	count, ok := searchResult["count"].(float64)
-	if !ok || count < 1 {
-		t.Fatalf("expected at least 1 result, got %v", searchResult["count"])
+	returned, ok := searchResult["returned"].(float64)
+	if !ok || returned < 1 {
+		t.Fatalf("expected at least 1 result, got %v", searchResult["returned"])
 	}
 
 	// Verify the text is in the payload and score is present
@@ -614,14 +539,10 @@ func TestCLITextAddWithPayload(t *testing.T) {
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
 
-	collection := "test_cli_text_payload_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add text with extra payload
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--text", "golang is great for cli tools",
 		"--payload", `{"source": "conversation", "confidence": 0.9}`,
 	)
@@ -636,7 +557,6 @@ func TestCLITextAddWithPayload(t *testing.T) {
 
 	// Search and check payload
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--query", "golang",
 		"--limit", "5",
 	)
@@ -669,9 +589,7 @@ func TestCLITextAddMissingText(t *testing.T) {
 	binary := buildBinary(t)
 
 	// No --text and no --vector should fail
-	_, err := runCLI(t, binary, "add",
-		"--collection", "test",
-	)
+	_, err := runCLI(t, binary, "add")
 	if err == nil {
 		t.Fatal("expected error when neither --text nor --vector provided")
 	}
@@ -681,9 +599,7 @@ func TestCLITextSearchMissingQuery(t *testing.T) {
 	binary := buildBinary(t)
 
 	// No --query and no --vector should fail
-	_, err := runCLI(t, binary, "search",
-		"--collection", "test",
-	)
+	_, err := runCLI(t, binary, "search")
 	if err == nil {
 		t.Fatal("expected error when neither --query nor --vector provided")
 	}
@@ -694,11 +610,8 @@ func TestCLITextForget(t *testing.T) {
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
 
-	collection := "test_cli_text_forget_" + t.Name()
-
 	// Add a text memory
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--text", "this memory will be forgotten",
 	)
 	if err != nil {
@@ -707,7 +620,6 @@ func TestCLITextForget(t *testing.T) {
 
 	// Forget with 0s TTL — should delete everything
 	out, err = runCLI(t, binary, "forget",
-		"--collection", collection,
 		"--ttl", "0s",
 	)
 	if err != nil {
@@ -725,7 +637,6 @@ func TestCLITextForget(t *testing.T) {
 
 	// Verify search returns nothing
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--query", "forgotten",
 		"--limit", "10",
 	)
@@ -734,9 +645,9 @@ func TestCLITextForget(t *testing.T) {
 	}
 
 	searchResult := parseJSON(t, out)
-	count, _ := searchResult["count"].(float64)
-	if count != 0 {
-		t.Errorf("expected 0 results after forget, got %v", count)
+	returned, _ := searchResult["returned"].(float64)
+	if returned != 0 {
+		t.Errorf("expected 0 results after forget, got %v", returned)
 	}
 }
 
@@ -745,14 +656,10 @@ func TestCLITextAddWithCustomID(t *testing.T) {
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
 
-	collection := "test_cli_text_customid_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	customID := "aabbccdd-1122-3344-5566-778899aabbcc"
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--text", "text with custom id",
 		"--id", customID,
 	)
@@ -771,10 +678,7 @@ func TestCLITextSemanticSearch(t *testing.T) {
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
 
-	collection := "test_cli_semantic_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add memories with distinct topics
 	memories := []string{
@@ -784,7 +688,6 @@ func TestCLITextSemanticSearch(t *testing.T) {
 	}
 	for _, m := range memories {
 		out, err := runCLI(t, binary, "add",
-			"--collection", collection,
 			"--text", m,
 		)
 		if err != nil {
@@ -794,7 +697,6 @@ func TestCLITextSemanticSearch(t *testing.T) {
 
 	// Search for something semantically related to dark mode
 	out, err := runCLI(t, binary, "search",
-		"--collection", collection,
 		"--query", "night theme preferences",
 		"--limit", "3",
 	)
@@ -824,12 +726,12 @@ func TestCLIGlobalOllamaFlags(t *testing.T) {
 	binary := buildBinary(t)
 
 	// Test that --ollama-url and --model flags are accepted without error
-	// (they'll fail because of missing --collection, but shouldn't fail on flag parsing)
+	// (they'll fail because of missing --text/--vector, but shouldn't fail on flag parsing)
 	_, err := runCLI(t, binary, "--ollama-url", "http://example.com:11434", "--model", "test-model", "add")
 	if err == nil {
-		t.Fatal("expected error for missing --collection, not a pass")
+		t.Fatal("expected error for missing --text, not a pass")
 	}
-	// The error should be about missing collection, not about unknown flags
+	// The error should be about missing text/vector, not about unknown flags
 }
 
 func TestCLIGlobalHostFlag(t *testing.T) {
@@ -854,14 +756,10 @@ func TestCLIConfidenceFieldPresent(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_confidence_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add a memory
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--payload", `{"text": "confidence test"}`,
 	)
@@ -871,7 +769,6 @@ func TestCLIConfidenceFieldPresent(t *testing.T) {
 
 	// Search — response should include confidence field
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 	)
 	if err != nil {
@@ -892,14 +789,10 @@ func TestCLIConfidenceHigh(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_conf_high_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add and search with identical vector — score ~1.0, should be "high"
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.5, 0.5, 0.5, 0.5]",
 		"--payload", `{"text": "exact match"}`,
 	)
@@ -908,7 +801,6 @@ func TestCLIConfidenceHigh(t *testing.T) {
 	}
 
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--vector", "[0.5, 0.5, 0.5, 0.5]",
 	)
 	if err != nil {
@@ -925,14 +817,10 @@ func TestCLIConfidenceNone(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_conf_none_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add a memory then search with min-score so high nothing matches
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--payload", `{"text": "will not match"}`,
 	)
@@ -941,7 +829,6 @@ func TestCLIConfidenceNone(t *testing.T) {
 	}
 
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--vector", "[0.9, -0.9, 0.9, -0.9]",
 		"--min-score", "0.99",
 	)
@@ -953,9 +840,9 @@ func TestCLIConfidenceNone(t *testing.T) {
 	if result["confidence"] != "none" {
 		t.Errorf("expected confidence 'none' for empty results, got %v", result["confidence"])
 	}
-	count, _ := result["count"].(float64)
-	if count != 0 {
-		t.Errorf("expected 0 results, got %v", count)
+	returned, _ := result["returned"].(float64)
+	if returned != 0 {
+		t.Errorf("expected 0 results, got %v", returned)
 	}
 }
 
@@ -963,15 +850,11 @@ func TestCLIConfidenceLow(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_conf_low_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add a memory with one vector, query with a very different one
 	// Cosine similarity of orthogonal-ish vectors should be low
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--vector", "[1.0, 0.0, 0.0, 0.0]",
 		"--payload", `{"text": "low confidence test"}`,
 	)
@@ -981,7 +864,6 @@ func TestCLIConfidenceLow(t *testing.T) {
 
 	// Query with a nearly orthogonal vector — score should be close to 0
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--vector", "[0.01, 1.0, 0.0, 0.0]",
 	)
 	if err != nil {
@@ -1007,14 +889,10 @@ func TestCLIConfidenceWithTextQuery(t *testing.T) {
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
 
-	collection := "test_cli_conf_text_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add a text memory
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--text", "the cat sat on the mat",
 	)
 	if err != nil {
@@ -1023,7 +901,6 @@ func TestCLIConfidenceWithTextQuery(t *testing.T) {
 
 	// Query with semantically related text — should have confidence field
 	out, err = runCLI(t, binary, "search",
-		"--collection", collection,
 		"--query", "cat sitting on a mat",
 		"--limit", "3",
 	)
@@ -1051,17 +928,10 @@ func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
 
-	collection := "test_cli_pinned_" + t.Name()
-	defer func() {
-		// Force cleanup: forget with 0s TTL won't delete pinned memories,
-		// so we add a second forget after this test to clean up.
-		// In practice the collection will be cleaned up by future test runs.
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
+	defer cleanupMemories(t)
 
 	// Add a pinned memory
 	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
 		"--text", "this memory is pinned and should survive",
 		"--pinned",
 	)
@@ -1077,7 +947,6 @@ func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
 
 	// Add an unpinned memory
 	out, err = runCLI(t, binary, "add",
-		"--collection", collection,
 		"--text", "this memory is not pinned and should be forgotten",
 	)
 	if err != nil {
@@ -1086,7 +955,6 @@ func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
 
 	// Forget with 0s TTL — should delete only the unpinned one
 	out, err = runCLI(t, binary, "forget",
-		"--collection", collection,
 		"--ttl", "0s",
 	)
 	if err != nil {
@@ -1101,7 +969,6 @@ func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
 
 	// Verify the pinned memory is still retrievable by ID
 	out, err = runCLI(t, binary, "get",
-		"--collection", collection,
 		"--id", pinnedID,
 	)
 	if err != nil {
@@ -1118,6 +985,16 @@ func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
 	}
 	if payload["pinned"] != true {
 		t.Errorf("expected pinned=true in payload, got %v", payload["pinned"])
+	}
+}
+
+// --- Collections command removed ---
+
+func TestCLICollectionsCommandRemoved(t *testing.T) {
+	binary := buildBinary(t)
+	_, err := runCLI(t, binary, "collections")
+	if err == nil {
+		t.Fatal("expected error for removed 'collections' command")
 	}
 }
 

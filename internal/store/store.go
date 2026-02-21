@@ -12,6 +12,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// collectionName is the single Qdrant collection used for all memories.
+const collectionName = "memories"
+
 // Store wraps the Qdrant client and provides memory operations.
 type Store struct {
 	client *qdrant.Client
@@ -41,9 +44,9 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
-// ensureCollection creates a collection if it doesn't exist.
-func (s *Store) ensureCollection(ctx context.Context, name string, vectorSize uint64) error {
-	exists, err := s.client.CollectionExists(ctx, name)
+// ensureCollection creates the memories collection if it doesn't exist.
+func (s *Store) ensureCollection(ctx context.Context, vectorSize uint64) error {
+	exists, err := s.client.CollectionExists(ctx, collectionName)
 	if err != nil {
 		return fmt.Errorf("check collection: %w", err)
 	}
@@ -52,7 +55,7 @@ func (s *Store) ensureCollection(ctx context.Context, name string, vectorSize ui
 	}
 
 	err = s.client.CreateCollection(ctx, &qdrant.CreateCollection{
-		CollectionName: name,
+		CollectionName: collectionName,
 		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
 			Size:     vectorSize,
 			Distance: qdrant.Distance_Cosine,
@@ -64,11 +67,11 @@ func (s *Store) ensureCollection(ctx context.Context, name string, vectorSize ui
 	return nil
 }
 
-// Add stores a vector with its payload in the given collection.
+// Add stores a vector with its payload.
 // It auto-adds created_at and last_accessed timestamps to the payload.
 // If id is empty, a UUID is generated.
-func (s *Store) Add(ctx context.Context, collection string, id string, vector []float32, payload map[string]any) (string, error) {
-	if err := s.ensureCollection(ctx, collection, uint64(len(vector))); err != nil {
+func (s *Store) Add(ctx context.Context, id string, vector []float32, payload map[string]any) (string, error) {
+	if err := s.ensureCollection(ctx, uint64(len(vector))); err != nil {
 		return "", err
 	}
 
@@ -83,7 +86,7 @@ func (s *Store) Add(ctx context.Context, collection string, id string, vector []
 
 	wait := true
 	_, err := s.client.Upsert(ctx, &qdrant.UpsertPoints{
-		CollectionName: collection,
+		CollectionName: collectionName,
 		Wait:           &wait,
 		Points: []*qdrant.PointStruct{
 			{
@@ -100,12 +103,12 @@ func (s *Store) Add(ctx context.Context, collection string, id string, vector []
 	return id, nil
 }
 
-// Retrieve queries the collection and returns the top matches.
+// Retrieve queries memories and returns the top matches.
 // It updates last_accessed on all returned points.
 // Ranking is pure cosine similarity.
-func (s *Store) Retrieve(ctx context.Context, collection string, vector []float32, minScore float32, limit uint64) ([]Result, error) {
+func (s *Store) Retrieve(ctx context.Context, vector []float32, minScore float32, limit uint64) ([]Result, error) {
 	query := &qdrant.QueryPoints{
-		CollectionName: collection,
+		CollectionName: collectionName,
 		Query:          qdrant.NewQuery(vector...),
 		WithPayload:    qdrant.NewWithPayload(true),
 		ScoreThreshold: &minScore,
@@ -121,7 +124,7 @@ func (s *Store) Retrieve(ctx context.Context, collection string, vector []float3
 	out := make([]Result, 0, len(results))
 
 	for _, point := range results {
-		s.updateLastAccessed(ctx, collection, point.Id, nowStr)
+		s.updateLastAccessed(ctx, point.Id, nowStr)
 
 		out = append(out, Result{
 			ID:      pointIDToString(point.Id),
@@ -133,19 +136,19 @@ func (s *Store) Retrieve(ctx context.Context, collection string, vector []float3
 	return out, nil
 }
 
-// Get retrieves a single point by its UUID from the given collection.
+// Get retrieves a single point by its UUID.
 // Returns nil if the point is not found. Updates last_accessed on retrieval.
-func (s *Store) Get(ctx context.Context, collection string, id string) (*Result, error) {
-	exists, err := s.client.CollectionExists(ctx, collection)
+func (s *Store) Get(ctx context.Context, id string) (*Result, error) {
+	exists, err := s.client.CollectionExists(ctx, collectionName)
 	if err != nil {
 		return nil, fmt.Errorf("check collection: %w", err)
 	}
 	if !exists {
-		return nil, fmt.Errorf("collection %q does not exist", collection)
+		return nil, nil
 	}
 
 	points, err := s.client.Get(ctx, &qdrant.GetPoints{
-		CollectionName: collection,
+		CollectionName: collectionName,
 		Ids:            []*qdrant.PointId{qdrant.NewIDUUID(id)},
 		WithPayload:    qdrant.NewWithPayload(true),
 		WithVectors:    qdrant.NewWithVectors(false),
@@ -162,7 +165,7 @@ func (s *Store) Get(ctx context.Context, collection string, id string) (*Result,
 
 	// Update last_accessed
 	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
-	s.updateLastAccessed(ctx, collection, point.Id, nowStr)
+	s.updateLastAccessed(ctx, point.Id, nowStr)
 
 	return &Result{
 		ID:      pointIDToString(point.Id),
@@ -173,14 +176,14 @@ func (s *Store) Get(ctx context.Context, collection string, id string) (*Result,
 
 // Forget deletes memories not accessed within the given TTL.
 // Returns the number of memories deleted.
-func (s *Store) Forget(ctx context.Context, collection string, ttl time.Duration) (int, error) {
+func (s *Store) Forget(ctx context.Context, ttl time.Duration) (int, error) {
 	// Check if collection exists first
-	exists, err := s.client.CollectionExists(ctx, collection)
+	exists, err := s.client.CollectionExists(ctx, collectionName)
 	if err != nil {
 		return 0, fmt.Errorf("check collection: %w", err)
 	}
 	if !exists {
-		return 0, fmt.Errorf("collection %q does not exist", collection)
+		return 0, nil
 	}
 
 	cutoff := time.Now().UTC().Add(-ttl)
@@ -197,7 +200,7 @@ func (s *Store) Forget(ctx context.Context, collection string, ttl time.Duration
 	}
 
 	// Scroll to find all stale points
-	pointIDs, err := s.scrollPointIDs(ctx, collection, filter)
+	pointIDs, err := s.scrollPointIDs(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("scroll stale points: %w", err)
 	}
@@ -209,7 +212,7 @@ func (s *Store) Forget(ctx context.Context, collection string, ttl time.Duration
 	// Delete them
 	wait := true
 	_, err = s.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collection,
+		CollectionName: collectionName,
 		Wait:           &wait,
 		Points: &qdrant.PointsSelector{
 			PointsSelectorOneOf: &qdrant.PointsSelector_Points{
@@ -226,33 +229,56 @@ func (s *Store) Forget(ctx context.Context, collection string, ttl time.Duration
 	return len(pointIDs), nil
 }
 
-// Collections returns the names of all collections in Qdrant.
-func (s *Store) Collections(ctx context.Context) ([]string, error) {
-	names, err := s.client.ListCollections(ctx)
+// DeleteCollection deletes the memories collection entirely.
+// Used for testing and full resets. Returns nil if the collection doesn't exist.
+func (s *Store) DeleteCollection(ctx context.Context) error {
+	exists, err := s.client.CollectionExists(ctx, collectionName)
 	if err != nil {
-		return nil, fmt.Errorf("list collections: %w", err)
+		return fmt.Errorf("check collection: %w", err)
 	}
-	return names, nil
+	if !exists {
+		return nil
+	}
+	return s.client.DeleteCollection(ctx, collectionName)
+}
+
+// Count returns the approximate number of memories stored.
+func (s *Store) Count(ctx context.Context) (uint64, error) {
+	exists, err := s.client.CollectionExists(ctx, collectionName)
+	if err != nil {
+		return 0, fmt.Errorf("check collection: %w", err)
+	}
+	if !exists {
+		return 0, nil
+	}
+
+	count, err := s.client.Count(ctx, &qdrant.CountPoints{
+		CollectionName: collectionName,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count: %w", err)
+	}
+	return count, nil
 }
 
 // Check runs an end-to-end connectivity check against Qdrant.
 func (s *Store) Check(ctx context.Context) error {
-	collectionName := "clawbrain_check"
+	checkCollection := "clawbrain_check"
 
 	// Cleanup any leftover
-	exists, err := s.client.CollectionExists(ctx, collectionName)
+	exists, err := s.client.CollectionExists(ctx, checkCollection)
 	if err != nil {
 		return fmt.Errorf("check collection exists: %w", err)
 	}
 	if exists {
-		if err := s.client.DeleteCollection(ctx, collectionName); err != nil {
+		if err := s.client.DeleteCollection(ctx, checkCollection); err != nil {
 			return fmt.Errorf("cleanup leftover collection: %w", err)
 		}
 	}
 
 	// Create
 	err = s.client.CreateCollection(ctx, &qdrant.CreateCollection{
-		CollectionName: collectionName,
+		CollectionName: checkCollection,
 		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
 			Size:     4,
 			Distance: qdrant.Distance_Cosine,
@@ -265,7 +291,7 @@ func (s *Store) Check(ctx context.Context) error {
 	// Upsert
 	wait := true
 	_, err = s.client.Upsert(ctx, &qdrant.UpsertPoints{
-		CollectionName: collectionName,
+		CollectionName: checkCollection,
 		Wait:           &wait,
 		Points: []*qdrant.PointStruct{
 			{
@@ -281,7 +307,7 @@ func (s *Store) Check(ctx context.Context) error {
 
 	// Query
 	results, err := s.client.Query(ctx, &qdrant.QueryPoints{
-		CollectionName: collectionName,
+		CollectionName: checkCollection,
 		Query:          qdrant.NewQuery(0.1, 0.2, 0.3, 0.4),
 		WithPayload:    qdrant.NewWithPayload(true),
 	})
@@ -293,7 +319,7 @@ func (s *Store) Check(ctx context.Context) error {
 	}
 
 	// Cleanup
-	if err := s.client.DeleteCollection(ctx, collectionName); err != nil {
+	if err := s.client.DeleteCollection(ctx, checkCollection); err != nil {
 		return fmt.Errorf("cleanup test collection: %w", err)
 	}
 
@@ -303,10 +329,10 @@ func (s *Store) Check(ctx context.Context) error {
 // updateLastAccessed sets the last_accessed payload field on a point.
 // Errors are logged but not propagated — a failed timestamp update should
 // not cause a retrieval to fail.
-func (s *Store) updateLastAccessed(ctx context.Context, collection string, id *qdrant.PointId, timestamp string) {
+func (s *Store) updateLastAccessed(ctx context.Context, id *qdrant.PointId, timestamp string) {
 	wait := true
 	_, err := s.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
-		CollectionName: collection,
+		CollectionName: collectionName,
 		Wait:           &wait,
 		Payload: qdrant.NewValueMap(map[string]any{
 			"last_accessed": timestamp, // RFC3339Nano for sub-second precision
@@ -324,15 +350,15 @@ func (s *Store) updateLastAccessed(ctx context.Context, collection string, id *q
 	}
 }
 
-// scrollPointIDs scrolls through a collection with a filter and returns all matching point IDs.
-func (s *Store) scrollPointIDs(ctx context.Context, collection string, filter *qdrant.Filter) ([]*qdrant.PointId, error) {
+// scrollPointIDs scrolls through memories with a filter and returns all matching point IDs.
+func (s *Store) scrollPointIDs(ctx context.Context, filter *qdrant.Filter) ([]*qdrant.PointId, error) {
 	var allIDs []*qdrant.PointId
 	var offset *qdrant.PointId
 	limit := uint32(100)
 
 	for {
 		points, nextOffset, err := s.client.ScrollAndOffset(ctx, &qdrant.ScrollPoints{
-			CollectionName: collection,
+			CollectionName: collectionName,
 			Filter:         filter,
 			Limit:          &limit,
 			Offset:         offset,

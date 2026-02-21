@@ -1,7 +1,7 @@
 #!/bin/sh
 # forget.sh — Automatic memory decay sidecar.
 #
-# Runs in a loop: lists all collections, runs forget on each, sleeps.
+# Runs in a loop: runs forget on the single memories collection, sleeps.
 # Memories that haven't been accessed within the TTL fade away naturally.
 #
 # Environment variables:
@@ -30,22 +30,10 @@ log "Qdrant is up."
 log "Starting forget loop: ttl=${TTL}, interval=${INTERVAL}s"
 
 while true; do
-    # List all collections — extract names from JSON array
-    COLLECTIONS=$("${CLAWBRAIN}" --host "${HOST}" collections 2>/dev/null)
-    COUNT=$(echo "${COLLECTIONS}" | grep -o '"count":[0-9]*' | grep -o '[0-9]*')
-
-    if [ "${COUNT}" = "0" ] || [ -z "${COUNT}" ]; then
-        log "No collections found, sleeping."
-    else
-        # Extract the array value, then pull out quoted strings
-        NAMES=$(echo "${COLLECTIONS}" | sed 's/.*"collections":\[//;s/\].*//' | grep -o '"[^"]*"' | tr -d '"')
-        for NAME in ${NAMES}; do
-            RESULT=$("${CLAWBRAIN}" --host "${HOST}" forget --collection "${NAME}" --ttl "${TTL}" 2>/dev/null) || true
-            DELETED=$(echo "${RESULT}" | grep -o '"deleted":[0-9]*' | grep -o '[0-9]*')
-            if [ "${DELETED}" != "0" ] && [ -n "${DELETED}" ]; then
-                log "Forgot ${DELETED} memories from ${NAME}"
-            fi
-        done
+    RESULT=$("${CLAWBRAIN}" --host "${HOST}" forget --ttl "${TTL}" 2>/dev/null) || true
+    DELETED=$(echo "${RESULT}" | grep -o '"deleted":[0-9]*' | grep -o '[0-9]*')
+    if [ "${DELETED}" != "0" ] && [ -n "${DELETED}" ]; then
+        log "Forgot ${DELETED} memories"
     fi
 
     sleep "${INTERVAL}"

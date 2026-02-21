@@ -33,25 +33,12 @@ func testStore(t *testing.T) *Store {
 	return s
 }
 
-// testCollection creates a unique collection name for each test and ensures cleanup.
-func testCollection(t *testing.T) string {
-	t.Helper()
-	return "test_" + t.Name()
-}
-
-// cleanupCollection deletes a collection if it exists.
-func cleanupCollection(t *testing.T, s *Store, collection string) {
+// cleanupMemories deletes the memories collection if it exists.
+func cleanupMemories(t *testing.T, s *Store) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	exists, err := s.client.CollectionExists(ctx, collection)
-	if err != nil {
-		return
-	}
-	if exists {
-		_ = s.client.DeleteCollection(ctx, collection)
-	}
+	_ = s.DeleteCollection(ctx)
 }
 
 // --- Integration Tests (require Qdrant) ---
@@ -71,15 +58,13 @@ func TestCheck(t *testing.T) {
 func TestAdd(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	t.Run("auto-generated ID", func(t *testing.T) {
-		id, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+		id, err := s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
 			"text": "hello world",
 		})
 		if err != nil {
@@ -92,7 +77,7 @@ func TestAdd(t *testing.T) {
 
 	t.Run("custom ID", func(t *testing.T) {
 		customID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-		id, err := s.Add(ctx, collection, customID, []float32{0.5, 0.6, 0.7, 0.8}, map[string]any{
+		id, err := s.Add(ctx, customID, []float32{0.5, 0.6, 0.7, 0.8}, map[string]any{
 			"text": "custom id",
 		})
 		if err != nil {
@@ -105,14 +90,14 @@ func TestAdd(t *testing.T) {
 
 	t.Run("payload includes timestamps", func(t *testing.T) {
 		// Add and then retrieve to check timestamps
-		id, err := s.Add(ctx, collection, "", []float32{0.9, 0.8, 0.7, 0.6}, map[string]any{
+		id, err := s.Add(ctx, "", []float32{0.9, 0.8, 0.7, 0.6}, map[string]any{
 			"text": "timestamp check",
 		})
 		if err != nil {
 			t.Fatalf("Add failed: %v", err)
 		}
 
-		results, err := s.Retrieve(ctx, collection, []float32{0.9, 0.8, 0.7, 0.6}, 0.9, 10)
+		results, err := s.Retrieve(ctx, []float32{0.9, 0.8, 0.7, 0.6}, 0.9, 10)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -138,29 +123,27 @@ func TestAdd(t *testing.T) {
 func TestRetrieve(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Seed data
-	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "alpha"})
+	_, err := s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "alpha"})
 	if err != nil {
 		t.Fatalf("seed Add failed: %v", err)
 	}
-	_, err = s.Add(ctx, collection, "", []float32{0.9, 0.8, 0.7, 0.6}, map[string]any{"text": "beta"})
+	_, err = s.Add(ctx, "", []float32{0.9, 0.8, 0.7, 0.6}, map[string]any{"text": "beta"})
 	if err != nil {
 		t.Fatalf("seed Add failed: %v", err)
 	}
-	_, err = s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.5}, map[string]any{"text": "gamma"})
+	_, err = s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.5}, map[string]any{"text": "gamma"})
 	if err != nil {
 		t.Fatalf("seed Add failed: %v", err)
 	}
 
 	t.Run("top 1 result", func(t *testing.T) {
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1)
+		results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -176,7 +159,7 @@ func TestRetrieve(t *testing.T) {
 	})
 
 	t.Run("limit controls result count", func(t *testing.T) {
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 3)
+		results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 3)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -186,7 +169,7 @@ func TestRetrieve(t *testing.T) {
 	})
 
 	t.Run("min-score filters low matches", func(t *testing.T) {
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.999, 10)
+		results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.999, 10)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -197,7 +180,7 @@ func TestRetrieve(t *testing.T) {
 	})
 
 	t.Run("results sorted by score descending", func(t *testing.T) {
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+		results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -211,7 +194,7 @@ func TestRetrieve(t *testing.T) {
 
 	t.Run("updates last_accessed on retrieval", func(t *testing.T) {
 		// First retrieve to get baseline
-		results1, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
+		results1, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -226,7 +209,7 @@ func TestRetrieve(t *testing.T) {
 		time.Sleep(1100 * time.Millisecond)
 
 		// Second retrieve should have updated last_accessed
-		results2, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
+		results2, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -249,26 +232,24 @@ func TestRetrieve(t *testing.T) {
 func TestRetrieveEmptyCollection(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Add and then forget to create an empty collection
-	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "temp"})
+	_, err := s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "temp"})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
 
 	time.Sleep(1100 * time.Millisecond)
-	_, err = s.Forget(ctx, collection, 1*time.Second)
+	_, err = s.Forget(ctx, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Forget failed: %v", err)
 	}
 
-	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+	results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
 	if err != nil {
 		t.Fatalf("Retrieve on empty collection failed: %v", err)
 	}
@@ -280,25 +261,23 @@ func TestRetrieveEmptyCollection(t *testing.T) {
 func TestForget(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Add two memories
-	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "old"})
+	_, err := s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "old"})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
-	_, err = s.Add(ctx, collection, "", []float32{0.5, 0.6, 0.7, 0.8}, map[string]any{"text": "also old"})
+	_, err = s.Add(ctx, "", []float32{0.5, 0.6, 0.7, 0.8}, map[string]any{"text": "also old"})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
 
 	t.Run("no deletions when within TTL", func(t *testing.T) {
-		deleted, err := s.Forget(ctx, collection, 1*time.Hour)
+		deleted, err := s.Forget(ctx, 1*time.Hour)
 		if err != nil {
 			t.Fatalf("Forget failed: %v", err)
 		}
@@ -311,7 +290,7 @@ func TestForget(t *testing.T) {
 		// Wait so memories become stale
 		time.Sleep(1100 * time.Millisecond)
 
-		deleted, err := s.Forget(ctx, collection, 1*time.Second)
+		deleted, err := s.Forget(ctx, 1*time.Second)
 		if err != nil {
 			t.Fatalf("Forget failed: %v", err)
 		}
@@ -320,7 +299,7 @@ func TestForget(t *testing.T) {
 		}
 
 		// Verify they're gone
-		results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+		results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
 		if err != nil {
 			t.Fatalf("Retrieve failed: %v", err)
 		}
@@ -329,10 +308,15 @@ func TestForget(t *testing.T) {
 		}
 	})
 
-	t.Run("nonexistent collection errors", func(t *testing.T) {
-		_, err := s.Forget(ctx, "nonexistent_collection_xyz", 1*time.Hour)
-		if err == nil {
-			t.Fatal("expected error for nonexistent collection")
+	t.Run("no error on nonexistent collection", func(t *testing.T) {
+		// Delete the collection to simulate nonexistence
+		cleanupMemories(t, s)
+		deleted, err := s.Forget(ctx, 1*time.Hour)
+		if err != nil {
+			t.Fatalf("Forget on nonexistent collection should not error: %v", err)
+		}
+		if deleted != 0 {
+			t.Fatalf("expected 0 deletions, got %d", deleted)
 		}
 	})
 }
@@ -340,19 +324,17 @@ func TestForget(t *testing.T) {
 func TestForgetPreservesRecentlyAccessed(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Add two memories
-	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "will be accessed"})
+	_, err := s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "will be accessed"})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
-	_, err = s.Add(ctx, collection, "", []float32{0.9, 0.8, 0.7, 0.6}, map[string]any{"text": "will be forgotten"})
+	_, err = s.Add(ctx, "", []float32{0.9, 0.8, 0.7, 0.6}, map[string]any{"text": "will be forgotten"})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
@@ -361,13 +343,13 @@ func TestForgetPreservesRecentlyAccessed(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 
 	// Access only the first one (exact match query)
-	_, err = s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
+	_, err = s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
 	if err != nil {
 		t.Fatalf("Retrieve failed: %v", err)
 	}
 
 	// Now forget with a short TTL — only the un-accessed one should be deleted
-	deleted, err := s.Forget(ctx, collection, 1*time.Second)
+	deleted, err := s.Forget(ctx, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Forget failed: %v", err)
 	}
@@ -376,7 +358,7 @@ func TestForgetPreservesRecentlyAccessed(t *testing.T) {
 	}
 
 	// The accessed one should still be there
-	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+	results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
 	if err != nil {
 		t.Fatalf("Retrieve failed: %v", err)
 	}
@@ -391,9 +373,7 @@ func TestForgetPreservesRecentlyAccessed(t *testing.T) {
 func TestAddUpsertBehavior(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -401,7 +381,7 @@ func TestAddUpsertBehavior(t *testing.T) {
 	fixedID := "11111111-2222-3333-4444-555555555555"
 
 	// Add with a fixed ID
-	_, err := s.Add(ctx, collection, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+	_, err := s.Add(ctx, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
 		"text": "original",
 	})
 	if err != nil {
@@ -409,7 +389,7 @@ func TestAddUpsertBehavior(t *testing.T) {
 	}
 
 	// Upsert same ID with different payload
-	_, err = s.Add(ctx, collection, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+	_, err = s.Add(ctx, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
 		"text": "updated",
 	})
 	if err != nil {
@@ -417,7 +397,7 @@ func TestAddUpsertBehavior(t *testing.T) {
 	}
 
 	// Retrieve — should only get one result with the updated payload
-	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 10)
+	results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 10)
 	if err != nil {
 		t.Fatalf("Retrieve failed: %v", err)
 	}
@@ -432,65 +412,21 @@ func TestAddUpsertBehavior(t *testing.T) {
 	}
 }
 
-func TestAddAutoCreatesCollection(t *testing.T) {
-	s := testStore(t)
-	defer s.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Test with 3-dimensional vector
-	collection3d := testCollection(t) + "_3d"
-	defer cleanupCollection(t, s, collection3d)
-
-	_, err := s.Add(ctx, collection3d, "", []float32{0.1, 0.2, 0.3}, map[string]any{"dim": 3})
-	if err != nil {
-		t.Fatalf("Add with 3d vector failed: %v", err)
-	}
-
-	results, err := s.Retrieve(ctx, collection3d, []float32{0.1, 0.2, 0.3}, 0.0, 1)
-	if err != nil {
-		t.Fatalf("Retrieve 3d failed: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-
-	// Test with 8-dimensional vector
-	collection8d := testCollection(t) + "_8d"
-	defer cleanupCollection(t, s, collection8d)
-
-	_, err = s.Add(ctx, collection8d, "", []float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}, map[string]any{"dim": 8})
-	if err != nil {
-		t.Fatalf("Add with 8d vector failed: %v", err)
-	}
-
-	results, err = s.Retrieve(ctx, collection8d, []float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}, 0.0, 1)
-	if err != nil {
-		t.Fatalf("Retrieve 8d failed: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-}
-
 func TestForgetIdempotent(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "temp"})
+	_, err := s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "temp"})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
 
 	// Forget everything
-	deleted1, err := s.Forget(ctx, collection, 0)
+	deleted1, err := s.Forget(ctx, 0)
 	if err != nil {
 		t.Fatalf("First forget failed: %v", err)
 	}
@@ -499,7 +435,7 @@ func TestForgetIdempotent(t *testing.T) {
 	}
 
 	// Forget again — should delete 0 (already gone)
-	deleted2, err := s.Forget(ctx, collection, 0)
+	deleted2, err := s.Forget(ctx, 0)
 	if err != nil {
 		t.Fatalf("Second forget failed: %v", err)
 	}
@@ -511,20 +447,18 @@ func TestForgetIdempotent(t *testing.T) {
 func TestForgetLargeTTLDeletesNothing(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "fresh"})
+	_, err := s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "fresh"})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
 
 	// Forget with 1 year TTL — nothing should be deleted
-	deleted, err := s.Forget(ctx, collection, 365*24*time.Hour)
+	deleted, err := s.Forget(ctx, 365*24*time.Hour)
 	if err != nil {
 		t.Fatalf("Forget failed: %v", err)
 	}
@@ -533,7 +467,7 @@ func TestForgetLargeTTLDeletesNothing(t *testing.T) {
 	}
 
 	// Memory should still be there
-	results, err := s.Retrieve(ctx, collection, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1)
+	results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 1)
 	if err != nil {
 		t.Fatalf("Retrieve failed: %v", err)
 	}
@@ -545,16 +479,14 @@ func TestForgetLargeTTLDeletesNothing(t *testing.T) {
 func TestGet(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Add a memory with a known ID
 	fixedID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	_, err := s.Add(ctx, collection, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+	_, err := s.Add(ctx, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
 		"text": "get test memory",
 		"tag":  "important",
 	})
@@ -563,7 +495,7 @@ func TestGet(t *testing.T) {
 	}
 
 	t.Run("fetches existing memory by ID", func(t *testing.T) {
-		result, err := s.Get(ctx, collection, fixedID)
+		result, err := s.Get(ctx, fixedID)
 		if err != nil {
 			t.Fatalf("Get failed: %v", err)
 		}
@@ -588,7 +520,7 @@ func TestGet(t *testing.T) {
 	})
 
 	t.Run("returns nil for nonexistent ID", func(t *testing.T) {
-		result, err := s.Get(ctx, collection, "00000000-0000-0000-0000-000000000000")
+		result, err := s.Get(ctx, "00000000-0000-0000-0000-000000000000")
 		if err != nil {
 			t.Fatalf("Get failed: %v", err)
 		}
@@ -597,45 +529,101 @@ func TestGet(t *testing.T) {
 		}
 	})
 
-	t.Run("errors on nonexistent collection", func(t *testing.T) {
-		_, err := s.Get(ctx, "nonexistent_collection_xyz", fixedID)
-		if err == nil {
-			t.Fatal("expected error for nonexistent collection")
+	t.Run("returns nil when collection does not exist", func(t *testing.T) {
+		// Delete the collection to simulate nonexistence
+		cleanupMemories(t, s)
+		result, err := s.Get(ctx, fixedID)
+		if err != nil {
+			t.Fatalf("Get should not error on nonexistent collection: %v", err)
+		}
+		if result != nil {
+			t.Fatalf("expected nil when collection does not exist, got %+v", result)
 		}
 	})
+}
 
-	t.Run("updates last_accessed on retrieval", func(t *testing.T) {
-		// First get
-		result1, err := s.Get(ctx, collection, fixedID)
-		if err != nil {
-			t.Fatalf("Get failed: %v", err)
-		}
-		ts1, ok := result1.Payload["last_accessed"].(string)
-		if !ok {
-			t.Fatal("last_accessed not a string")
-		}
+func TestGetUpdatesLastAccessed(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+	defer cleanupMemories(t, s)
 
-		time.Sleep(1100 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-		// Second get — last_accessed should be updated
-		result2, err := s.Get(ctx, collection, fixedID)
-		if err != nil {
-			t.Fatalf("Get failed: %v", err)
-		}
-		ts2, ok := result2.Payload["last_accessed"].(string)
-		if !ok {
-			t.Fatal("last_accessed not a string")
-		}
-
-		t1, err1 := time.Parse(time.RFC3339Nano, ts1)
-		t2, err2 := time.Parse(time.RFC3339Nano, ts2)
-		if err1 != nil || err2 != nil {
-			t.Fatalf("failed to parse timestamps: %v / %v", err1, err2)
-		}
-		if !t2.After(t1) {
-			t.Errorf("last_accessed not updated: %s -> %s", ts1, ts2)
-		}
+	fixedID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	_, err := s.Add(ctx, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+		"text": "last accessed test",
 	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// First get
+	result1, err := s.Get(ctx, fixedID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	ts1, ok := result1.Payload["last_accessed"].(string)
+	if !ok {
+		t.Fatal("last_accessed not a string")
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+
+	// Second get — last_accessed should be updated
+	result2, err := s.Get(ctx, fixedID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	ts2, ok := result2.Payload["last_accessed"].(string)
+	if !ok {
+		t.Fatal("last_accessed not a string")
+	}
+
+	t1, err1 := time.Parse(time.RFC3339Nano, ts1)
+	t2, err2 := time.Parse(time.RFC3339Nano, ts2)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("failed to parse timestamps: %v / %v", err1, err2)
+	}
+	if !t2.After(t1) {
+		t.Errorf("last_accessed not updated: %s -> %s", ts1, ts2)
+	}
+}
+
+func TestCount(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+	defer cleanupMemories(t, s)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Count before adding anything (collection may not exist)
+	count, err := s.Count(ctx)
+	if err != nil {
+		t.Fatalf("Count failed: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 memories initially, got %d", count)
+	}
+
+	// Add some memories
+	_, err = s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{"text": "one"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	_, err = s.Add(ctx, "", []float32{0.5, 0.6, 0.7, 0.8}, map[string]any{"text": "two"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	count, err = s.Count(ctx)
+	if err != nil {
+		t.Fatalf("Count failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 memories, got %d", count)
+	}
 }
 
 // --- Unit Tests for helper functions ---
@@ -752,52 +740,16 @@ func TestValueToGo(t *testing.T) {
 	})
 }
 
-func TestCollections(t *testing.T) {
-	s := testStore(t)
-	defer s.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Create a known collection
-	collection := "test_collections_" + t.Name()
-	defer cleanupCollection(t, s, collection)
-
-	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3}, map[string]any{"text": "test"})
-	if err != nil {
-		t.Fatalf("add: %v", err)
-	}
-
-	// List collections — should include our test collection
-	names, err := s.Collections(ctx)
-	if err != nil {
-		t.Fatalf("collections: %v", err)
-	}
-
-	found := false
-	for _, name := range names {
-		if name == collection {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected to find %q in collections list, got %v", collection, names)
-	}
-}
-
 func TestForgetSkipsPinnedMemories(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
-
-	collection := testCollection(t)
-	defer cleanupCollection(t, s, collection)
+	defer cleanupMemories(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Add a pinned memory
-	pinnedID, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+	pinnedID, err := s.Add(ctx, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
 		"text":   "important pinned memory",
 		"pinned": true,
 	})
@@ -806,7 +758,7 @@ func TestForgetSkipsPinnedMemories(t *testing.T) {
 	}
 
 	// Add an unpinned memory
-	_, err = s.Add(ctx, collection, "", []float32{0.5, 0.6, 0.7, 0.8}, map[string]any{
+	_, err = s.Add(ctx, "", []float32{0.5, 0.6, 0.7, 0.8}, map[string]any{
 		"text": "ephemeral memory",
 	})
 	if err != nil {
@@ -817,7 +769,7 @@ func TestForgetSkipsPinnedMemories(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 
 	// Forget with a short TTL — only the unpinned one should be deleted
-	deleted, err := s.Forget(ctx, collection, 1*time.Second)
+	deleted, err := s.Forget(ctx, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Forget failed: %v", err)
 	}
@@ -826,7 +778,7 @@ func TestForgetSkipsPinnedMemories(t *testing.T) {
 	}
 
 	// The pinned one should still be there
-	result, err := s.Get(ctx, collection, pinnedID)
+	result, err := s.Get(ctx, pinnedID)
 	if err != nil {
 		t.Fatalf("Get pinned memory failed: %v", err)
 	}
