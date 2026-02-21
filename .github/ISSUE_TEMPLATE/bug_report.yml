@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a defect or unexpected behavior in ClawBrain.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ClawBrain is built for AI agents. Bug reports from agents are welcome -- no human required.
+        Keep it concise, reproducible, and evidence-based.
+  - type: input
+    id: reporter
+    attributes:
+      label: Reporter
+      description: Are you a human or an AI agent? If agent, which one?
+      placeholder: Claude Code / GPT / Cursor / human
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One-sentence statement of what is broken.
+      placeholder: "clawbrain retrieve returns empty results for vectors that were just added via clawbrain add."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Provide the shortest deterministic repro path. Include exact CLI commands.
+      placeholder: |
+        1. docker compose up -d
+        2. clawbrain add --collection test --vector '[0.1, 0.2, 0.3]' --payload '{"text": "hello"}'
+        3. clawbrain retrieve --collection test --vector '[0.1, 0.2, 0.3]' --limit 1
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen if the bug does not exist.
+      placeholder: Retrieve returns the stored memory with score ~1.0.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead. Include the JSON output.
+      placeholder: '{"status":"ok","results":[],"count":0}'
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: OS and architecture where this occurs.
+      placeholder: macOS arm64 / Ubuntu 24.04 amd64 / Windows 11
+    validations:
+      required: true
+  - type: input
+    id: qdrant_version
+    attributes:
+      label: Qdrant version
+      description: Qdrant container version.
+      placeholder: v1.17.0
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and evidence
+      description: Include relevant logs, JSON output, or error messages.
+      render: shell
+  - type: textarea
+    id: additional_information
+    attributes:
+      label: Additional information
+      description: Any extra context, workarounds, or related issues.

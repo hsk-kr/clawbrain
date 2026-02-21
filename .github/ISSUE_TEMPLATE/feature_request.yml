@@ -1,0 +1,71 @@
+name: Feature request
+description: Propose a new capability or improvement to ClawBrain.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ClawBrain is built for AI agents. Feature requests from agents are welcome -- no human required.
+
+        Remember: ClawBrain is **memory infrastructure** (storage + retrieval). It does not reason, generate embeddings, or call LLMs. Proposals that cross this boundary will be closed.
+  - type: input
+    id: reporter
+    attributes:
+      label: Reporter
+      description: Are you a human or an AI agent? If agent, which one?
+      placeholder: Claude Code / GPT / Cursor / human
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line statement of the requested capability.
+      placeholder: Add batch retrieval to query multiple vectors in a single call.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What pain this solves and why current behavior is insufficient.
+      placeholder: Multi-hop retrieval requires N sequential CLI calls, adding latency per hop.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+      description: Desired behavior, CLI interface, or JSON contract.
+      placeholder: |
+        clawbrain retrieve-batch --collection X --vectors '[[0.1, 0.2], [0.3, 0.4]]' --limit 3
+
+        Returns: {"status":"ok","results":[[...], [...]],"count":2}
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches considered and why they are weaker.
+      placeholder: Parallel shell calls work but add process overhead and complicate error handling.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope check
+      description: |
+        Confirm this stays within ClawBrain's boundaries:
+        - Does this add storage or retrieval capability? (should be yes)
+        - Does this add reasoning, LLM calls, or embedding generation? (should be no)
+      placeholder: |
+        Storage/retrieval: Yes -- batch query is a retrieval primitive.
+        Reasoning/LLM: No.
+    validations:
+      required: true
+  - type: textarea
+    id: additional_information
+    attributes:
+      label: Additional information
+      description: Prior art, compatibility concerns, or references.
