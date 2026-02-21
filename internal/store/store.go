@@ -226,13 +226,39 @@ func (s *Store) Forget(ctx context.Context, collection string, ttl time.Duration
 	return len(pointIDs), nil
 }
 
-// Collections returns the names of all collections in Qdrant.
-func (s *Store) Collections(ctx context.Context) ([]string, error) {
+// CollectionInfo holds the name and point count of a collection.
+type CollectionInfo struct {
+	Name   string `json:"name"`
+	Points uint64 `json:"points"`
+}
+
+// Collections returns all collections with their point counts.
+func (s *Store) Collections(ctx context.Context) ([]CollectionInfo, error) {
 	names, err := s.client.ListCollections(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list collections: %w", err)
 	}
-	return names, nil
+
+	infos := make([]CollectionInfo, 0, len(names))
+	for _, name := range names {
+		count, err := s.Count(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("count %q: %w", name, err)
+		}
+		infos = append(infos, CollectionInfo{Name: name, Points: count})
+	}
+	return infos, nil
+}
+
+// Count returns the approximate number of points in a collection.
+func (s *Store) Count(ctx context.Context, collection string) (uint64, error) {
+	count, err := s.client.Count(ctx, &qdrant.CountPoints{
+		CollectionName: collection,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count %q: %w", collection, err)
+	}
+	return count, nil
 }
 
 // Check runs an end-to-end connectivity check against Qdrant.

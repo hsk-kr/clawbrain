@@ -261,7 +261,7 @@ func runSearch(args []string) {
 		outputJSON(map[string]any{
 			"status":     "ok",
 			"results":    results,
-			"count":      len(results),
+			"returned":   len(results),
 			"confidence": confidence(results),
 		})
 	} else if *query != "" {
@@ -280,7 +280,7 @@ func runSearch(args []string) {
 		outputJSON(map[string]any{
 			"status":     "ok",
 			"results":    results,
-			"count":      len(results),
+			"returned":   len(results),
 			"confidence": confidence(results),
 		})
 	} else {
@@ -329,15 +329,15 @@ func runCollections() {
 	defer cancel()
 	defer s.Close()
 
-	names, err := s.Collections(ctx)
+	infos, err := s.Collections(ctx)
 	if err != nil {
 		exitJSON("error", err.Error())
 	}
 
 	outputJSON(map[string]any{
 		"status":      "ok",
-		"collections": names,
-		"count":       len(names),
+		"collections": infos,
+		"count":       len(infos),
 	})
 }
 

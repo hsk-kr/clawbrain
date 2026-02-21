@@ -167,9 +167,9 @@ func TestCLIAddAndSearch(t *testing.T) {
 	if searchResult["status"] != "ok" {
 		t.Fatalf("expected status ok, got %v", searchResult["status"])
 	}
-	count, ok := searchResult["count"].(float64)
-	if !ok || count < 1 {
-		t.Fatalf("expected at least 1 result, got %v", searchResult["count"])
+	returned, ok := searchResult["returned"].(float64)
+	if !ok || returned < 1 {
+		t.Fatalf("expected at least 1 result, got %v", searchResult["returned"])
 	}
 }
 
@@ -268,9 +268,9 @@ func TestCLIForget(t *testing.T) {
 	}
 
 	searchResult := parseJSON(t, out)
-	count, _ := searchResult["count"].(float64)
-	if count != 0 {
-		t.Errorf("expected 0 results after forget, got %v", count)
+	returned, _ := searchResult["returned"].(float64)
+	if returned != 0 {
+		t.Errorf("expected 0 results after forget, got %v", returned)
 	}
 }
 
@@ -424,8 +424,19 @@ func TestCLICollections(t *testing.T) {
 
 	found := false
 	for _, c := range collections {
-		if c == collection {
+		obj, ok := c.(map[string]any)
+		if !ok {
+			t.Fatalf("expected collection entry to be an object, got %T", c)
+		}
+		if obj["name"] == collection {
 			found = true
+			points, ok := obj["points"].(float64)
+			if !ok {
+				t.Fatalf("expected points to be a number, got %T", obj["points"])
+			}
+			if points < 1 {
+				t.Errorf("expected at least 1 point in collection, got %v", points)
+			}
 			break
 		}
 	}
@@ -592,9 +603,9 @@ func TestCLITextAddAndSearch(t *testing.T) {
 	if searchResult["status"] != "ok" {
 		t.Fatalf("expected status ok, got %v", searchResult["status"])
 	}
-	count, ok := searchResult["count"].(float64)
-	if !ok || count < 1 {
-		t.Fatalf("expected at least 1 result, got %v", searchResult["count"])
+	returned, ok := searchResult["returned"].(float64)
+	if !ok || returned < 1 {
+		t.Fatalf("expected at least 1 result, got %v", searchResult["returned"])
 	}
 
 	// Verify the text is in the payload and score is present
@@ -734,9 +745,9 @@ func TestCLITextForget(t *testing.T) {
 	}
 
 	searchResult := parseJSON(t, out)
-	count, _ := searchResult["count"].(float64)
-	if count != 0 {
-		t.Errorf("expected 0 results after forget, got %v", count)
+	returned, _ := searchResult["returned"].(float64)
+	if returned != 0 {
+		t.Errorf("expected 0 results after forget, got %v", returned)
 	}
 }
 
@@ -953,9 +964,9 @@ func TestCLIConfidenceNone(t *testing.T) {
 	if result["confidence"] != "none" {
 		t.Errorf("expected confidence 'none' for empty results, got %v", result["confidence"])
 	}
-	count, _ := result["count"].(float64)
-	if count != 0 {
-		t.Errorf("expected 0 results, got %v", count)
+	returned, _ := result["returned"].(float64)
+	if returned != 0 {
+		t.Errorf("expected 0 results, got %v", returned)
 	}
 }
 

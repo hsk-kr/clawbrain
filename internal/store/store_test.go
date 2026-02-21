@@ -768,21 +768,24 @@ func TestCollections(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
-	// List collections — should include our test collection
-	names, err := s.Collections(ctx)
+	// List collections — should include our test collection with point count
+	infos, err := s.Collections(ctx)
 	if err != nil {
 		t.Fatalf("collections: %v", err)
 	}
 
 	found := false
-	for _, name := range names {
-		if name == collection {
+	for _, info := range infos {
+		if info.Name == collection {
 			found = true
+			if info.Points < 1 {
+				t.Errorf("expected at least 1 point in collection, got %d", info.Points)
+			}
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected to find %q in collections list, got %v", collection, names)
+		t.Errorf("expected to find %q in collections list, got %v", collection, infos)
 	}
 }
 
