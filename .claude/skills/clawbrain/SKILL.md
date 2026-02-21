@@ -48,24 +48,27 @@ These principles are non-negotiable. Every contribution must respect them:
 
 | Component | Version | Purpose |
 |---|---|---|
-| Go | 1.25 | Application language |
-| Qdrant | v1.17.0 | Vector database (Docker) |
+| Docker | -- | Runs Qdrant and builds binaries (only hard dependency) |
+| Go | 1.25 | Application language (runs inside Docker for builds) |
+| Qdrant | v1.17.0 | Vector database (Docker container) |
 | go-client | v1.17.1 | Qdrant Go gRPC client |
 
 ### Project Structure
 
 ```
+build/                 # Cross-compiled binaries (committed, built by pre-commit hook)
+build.sh               # Cross-compile script (uses Docker, no local Go needed)
 cmd/
   clawbrain/
-    main.go          # CLI entrypoint -- command dispatch, flag parsing, JSON output
-    main_test.go     # End-to-end CLI integration tests (builds binary, runs as subprocess)
+    main.go            # CLI entrypoint -- command dispatch, flag parsing, JSON output
+    main_test.go       # End-to-end CLI integration tests (builds binary, runs as subprocess)
   check/
-    main.go          # Standalone connectivity check (early prototype, not used by CLI)
+    main.go            # Standalone connectivity check (early prototype, not used by CLI)
 internal/
   store/
-    store.go         # Core Qdrant store abstraction -- all database operations
-    store_test.go    # Store unit + integration tests
-docker-compose.yml   # Qdrant container (ports 6333 REST, 6334 gRPC)
+    store.go           # Core Qdrant store abstraction -- all database operations
+    store_test.go      # Store unit + integration tests
+docker-compose.yml     # Qdrant container (ports 6333 REST, 6334 gRPC)
 ```
 
 ### Data Flow
@@ -239,8 +242,10 @@ The dreaming orchestration lives in the agent layer. ClawBrain provides the prim
 
 ### Prerequisites
 
-- Go 1.25+
-- Docker and Docker Compose
+- **Docker** and **Docker Compose** -- the only hard dependency
+  - Qdrant runs as a Docker container
+  - Builds use a Docker Go image (no local Go installation needed)
+- Go 1.25+ (optional, only if you want to run/test locally without Docker)
 
 ### Running
 
@@ -260,9 +265,29 @@ docker compose down
 
 ### Building
 
+Builds use Docker -- no local Go installation needed.
+
 ```bash
+# Cross-compile all platforms (outputs to build/)
+./build.sh
+
+# Or build locally if you have Go installed
 go build -o clawbrain ./cmd/clawbrain
 ```
+
+A **pre-commit git hook** runs `build.sh` automatically before every commit, so `build/` always contains up-to-date binaries for all platforms. The hook stages the binaries into the commit.
+
+Cross-compile targets:
+
+| OS | Arch | Binary |
+|---|---|---|
+| Linux | amd64 | `build/clawbrain-linux-amd64` |
+| Linux | arm64 | `build/clawbrain-linux-arm64` |
+| macOS | amd64 (Intel) | `build/clawbrain-darwin-amd64` |
+| macOS | arm64 (Apple Silicon) | `build/clawbrain-darwin-arm64` |
+| Windows | amd64 | `build/clawbrain-windows-amd64.exe` |
+
+All binaries are statically linked (`CGO_ENABLED=0`), built inside a `golang:1.25` Docker container.
 
 ### Testing
 
