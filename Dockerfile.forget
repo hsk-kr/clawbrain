@@ -1,0 +1,5 @@
+FROM alpine:3.21
+COPY build/clawbrain-linux-amd64 /usr/local/bin/clawbrain
+COPY forget.sh /usr/local/bin/forget.sh
+RUN chmod +x /usr/local/bin/clawbrain /usr/local/bin/forget.sh
+ENTRYPOINT ["/usr/local/bin/forget.sh"]

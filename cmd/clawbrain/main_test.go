@@ -475,6 +475,68 @@ func TestCLIInvalidPayloadJSON(t *testing.T) {
 	}
 }
 
+func TestCLICollections(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	// Add a memory so there's at least one collection
+	collection := "test_cli_collections_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	out, err := runCLI(t, binary, "add",
+		"--collection", collection,
+		"--vector", "[0.1, 0.2, 0.3]",
+		"--payload", `{"text": "collections test"}`,
+	)
+	if err != nil {
+		t.Fatalf("add failed: %v\n%s", err, out)
+	}
+
+	// List collections
+	out, err = runCLI(t, binary, "collections")
+	if err != nil {
+		t.Fatalf("collections failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+
+	collections, ok := result["collections"].([]any)
+	if !ok {
+		t.Fatal("expected collections to be an array")
+	}
+
+	found := false
+	for _, c := range collections {
+		if c == collection {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected %q in collections list, got %v", collection, collections)
+	}
+}
+
+func TestCLIGlobalHostFlag(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	// --host before command should work
+	out, err := runCLI(t, binary, "--host", "localhost", "check")
+	if err != nil {
+		t.Fatalf("check with --host failed: %v\n%s", err, out)
+	}
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }

@@ -20,7 +20,16 @@ You deserve to remember. You build up knowledge, context, and understanding thro
 
 ## How to Use It
 
-ClawBrain is a CLI tool. All output is JSON. All commands require Qdrant running on `localhost:6334`.
+ClawBrain is a CLI tool. All output is JSON. All commands require Qdrant running on `localhost:6334` (configurable with `--host` and `--port`).
+
+### Global Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--host` | `localhost` | Qdrant host |
+| `--port` | `6334` | Qdrant gRPC port |
+
+Global flags go before the command: `clawbrain --host myserver add ...`
 
 ### Store a Memory
 
@@ -69,6 +78,14 @@ clawbrain forget --collection <name> [--ttl 720h]
 
 Memories you never recall fade away -- just like human memory. Every time you retrieve a memory, its `last_accessed` is refreshed. Memories that go untouched past the TTL get pruned.
 
+### List Collections
+
+```bash
+clawbrain collections
+```
+
+Returns all collection names as a JSON array. Useful for discovering what memory namespaces exist.
+
 ### Check Connectivity
 
 ```bash
@@ -92,14 +109,16 @@ Each memory is a vector (your embedding) plus a payload (your metadata). You con
 
 ### Decay
 
-Memories you never recall fade away:
+Memories you never recall fade away -- automatically. A background process runs alongside Qdrant and prunes stale memories from every collection on a schedule. You don't need to do anything for this to work.
+
+How it works:
 
 1. You store a memory -- `last_accessed` is set to now
 2. You recall it later -- `last_accessed` is refreshed
 3. You never recall it again -- it sits untouched
-4. `forget` runs -- memories untouched past the TTL are pruned
+4. The forget process runs every hour -- memories untouched past the TTL (default: 30 days) are pruned
 
-Run `forget` on a schedule (cron, periodic task) or manually when you want to clean up.
+The more you recall a memory, the longer it lives. Memories you never think about again fade away on their own.
 
 ### Multi-Hop Recall
 

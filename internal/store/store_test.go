@@ -791,3 +791,37 @@ func TestValueToGo(t *testing.T) {
 		}
 	})
 }
+
+func TestCollections(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create a known collection
+	collection := "test_collections_" + t.Name()
+	defer cleanupCollection(t, s, collection)
+
+	_, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3}, map[string]any{"text": "test"})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	// List collections — should include our test collection
+	names, err := s.Collections(ctx)
+	if err != nil {
+		t.Fatalf("collections: %v", err)
+	}
+
+	found := false
+	for _, name := range names {
+		if name == collection {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected to find %q in collections list, got %v", collection, names)
+	}
+}

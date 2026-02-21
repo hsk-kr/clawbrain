@@ -11,26 +11,31 @@ import (
 	"github.com/hsk-coder/clawbrain/internal/store"
 )
 
-const (
-	defaultHost = "localhost"
-	defaultPort = 6334
+// Global connection settings, set by parseGlobals.
+var (
+	globalHost = "localhost"
+	globalPort = 6334
 )
 
 func main() {
-	if len(os.Args) < 2 {
+	args := parseGlobals(os.Args[1:])
+
+	if len(args) == 0 {
 		printUsage()
 		os.Exit(1)
 	}
 
-	command := os.Args[1]
+	command := args[0]
 
 	switch command {
 	case "add":
-		runAdd(os.Args[2:])
+		runAdd(args[1:])
 	case "retrieve":
-		runRetrieve(os.Args[2:])
+		runRetrieve(args[1:])
 	case "forget":
-		runForget(os.Args[2:])
+		runForget(args[1:])
+	case "collections":
+		runCollections()
 	case "check":
 		runCheck()
 	default:
@@ -40,14 +45,42 @@ func main() {
 	}
 }
 
+// parseGlobals extracts --host and --port from the argument list and
+// returns the remaining arguments (command + subcommand flags).
+func parseGlobals(args []string) []string {
+	var remaining []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--host":
+			if i+1 < len(args) {
+				globalHost = args[i+1]
+				i++
+			}
+		case "--port":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &globalPort)
+				i++
+			}
+		default:
+			remaining = append(remaining, args[i])
+		}
+	}
+	return remaining
+}
+
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: clawbrain <command> [flags]")
+	fmt.Fprintln(os.Stderr, "Usage: clawbrain [--host HOST] [--port PORT] <command> [flags]")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Global flags:")
+	fmt.Fprintln(os.Stderr, "  --host         Qdrant host (default: localhost)")
+	fmt.Fprintln(os.Stderr, "  --port         Qdrant gRPC port (default: 6334)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  add        Store a memory")
-	fmt.Fprintln(os.Stderr, "  retrieve   Query similar memories")
-	fmt.Fprintln(os.Stderr, "  forget     Remove stale memories")
-	fmt.Fprintln(os.Stderr, "  check      Verify Qdrant connectivity")
+	fmt.Fprintln(os.Stderr, "  add            Store a memory")
+	fmt.Fprintln(os.Stderr, "  retrieve       Query similar memories")
+	fmt.Fprintln(os.Stderr, "  forget         Remove stale memories")
+	fmt.Fprintln(os.Stderr, "  collections    List all collections")
+	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant connectivity")
 }
 
 func runAdd(args []string) {
@@ -161,6 +194,23 @@ func runForget(args []string) {
 	})
 }
 
+func runCollections() {
+	s, ctx, cancel := connect()
+	defer cancel()
+	defer s.Close()
+
+	names, err := s.Collections(ctx)
+	if err != nil {
+		exitJSON("error", err.Error())
+	}
+
+	outputJSON(map[string]any{
+		"status":      "ok",
+		"collections": names,
+		"count":       len(names),
+	})
+}
+
 func runCheck() {
 	s, ctx, cancel := connect()
 	defer cancel()
@@ -179,7 +229,7 @@ func runCheck() {
 // connect creates a store connection and a context with timeout.
 // The caller should defer both s.Close() and cancel().
 func connect() (*store.Store, context.Context, context.CancelFunc) {
-	s, err := store.New(defaultHost, defaultPort)
+	s, err := store.New(globalHost, globalPort)
 	if err != nil {
 		exitJSON("error", err.Error())
 	}

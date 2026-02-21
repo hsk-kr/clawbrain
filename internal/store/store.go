@@ -229,6 +229,15 @@ func (s *Store) Forget(ctx context.Context, collection string, ttl time.Duration
 	return len(pointIDs), nil
 }
 
+// Collections returns the names of all collections in Qdrant.
+func (s *Store) Collections(ctx context.Context) ([]string, error) {
+	names, err := s.client.ListCollections(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list collections: %w", err)
+	}
+	return names, nil
+}
+
 // Check runs an end-to-end connectivity check against Qdrant.
 func (s *Store) Check(ctx context.Context) error {
 	collectionName := "clawbrain_check"
