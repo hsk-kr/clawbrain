@@ -101,7 +101,9 @@ Your query is embedded via Ollama and compared against stored vectors by cosine 
 
 Every memory you recall gets its `last_accessed` timestamp updated -- this keeps it alive and prevents it from being forgotten.
 
-The response includes a `count` field -- this is the number of results actually returned, which may be less than `--limit` if fewer memories matched or cleared the `--min-score` threshold.
+The response includes a `returned` field -- this is the number of results actually returned, which may be less than `--limit` if fewer memories matched or cleared the `--min-score` threshold.
+
+**Important:** Search is approximate nearest neighbor (ANN), not an exhaustive scan. Even with a high `--limit` and `--min-score 0.0`, the results are the nearest neighbors to your query vector -- not all memories in the collection. Different queries surface different subsets. To see the actual total number of memories per collection, use `clawbrain collections`.
 
 **Advanced:** You can pass `--vector` instead of `--query` to search by pre-computed embedding vector. This bypasses Ollama.
 
