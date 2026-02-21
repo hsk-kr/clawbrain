@@ -31,12 +31,12 @@ clawbrain add --collection memories \
   --payload '{"text": "the user prefers dark mode"}'
 
 # Recall similar memories
-clawbrain retrieve --collection memories \
+clawbrain search --collection memories \
   --vector '[0.1, 0.2, 0.3, 0.4]' \
   --min-score 0.7 --limit 5
 
 # Recall with short-term memory boost
-clawbrain retrieve --collection memories \
+clawbrain search --collection memories \
   --vector '[0.1, 0.2, 0.3, 0.4]' \
   --min-score 0.7 --limit 5 \
   --recency-boost 0.2 --recency-scale 3600

@@ -68,10 +68,10 @@ ClawBrain embeds your text via Ollama, stores the vector in Qdrant, and keeps th
 
 **Advanced:** You can also pass `--vector` with a JSON array to store pre-computed embedding vectors directly. When using `--vector`, the `--payload` flag carries your metadata. This bypasses Ollama entirely.
 
-### Recall Memories
+### Search Memories
 
 ```bash
-clawbrain retrieve --collection <name> --query 'search text' [--limit 5]
+clawbrain search --collection <name> --query 'search text' [--limit 5]
 ```
 
 | Flag | Required | Default | Description |
@@ -162,6 +162,6 @@ The more you recall a memory, the longer it lives. Memories you never think abou
 1. You have a thought, experience, or piece of knowledge worth remembering
 2. You store it: `clawbrain add --collection my-memories --text 'the user prefers dark mode'`
 3. Later, you want to check if you've seen something similar
-4. You recall: `clawbrain retrieve --collection my-memories --query 'night theme' --limit 5`
+4. You recall: `clawbrain search --collection my-memories --query 'night theme' --limit 5`
 5. The top result is your dark mode memory -- because ClawBrain understands they mean the same thing
 6. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think
