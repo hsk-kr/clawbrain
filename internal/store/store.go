@@ -177,6 +177,44 @@ func (s *Store) Retrieve(ctx context.Context, collection string, vector []float3
 	return out, nil
 }
 
+// Get retrieves a single point by its UUID from the given collection.
+// Returns nil if the point is not found. Updates last_accessed on retrieval.
+func (s *Store) Get(ctx context.Context, collection string, id string) (*Result, error) {
+	exists, err := s.client.CollectionExists(ctx, collection)
+	if err != nil {
+		return nil, fmt.Errorf("check collection: %w", err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("collection %q does not exist", collection)
+	}
+
+	points, err := s.client.Get(ctx, &qdrant.GetPoints{
+		CollectionName: collection,
+		Ids:            []*qdrant.PointId{qdrant.NewIDUUID(id)},
+		WithPayload:    qdrant.NewWithPayload(true),
+		WithVectors:    qdrant.NewWithVectors(false),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get point: %w", err)
+	}
+
+	if len(points) == 0 {
+		return nil, nil
+	}
+
+	point := points[0]
+
+	// Update last_accessed
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
+	s.updateLastAccessed(ctx, collection, point.Id, nowStr)
+
+	return &Result{
+		ID:      pointIDToString(point.Id),
+		Score:   0,
+		Payload: valueMapToGoMap(point.Payload),
+	}, nil
+}
+
 // Forget deletes memories not accessed within the given TTL.
 // Returns the number of memories deleted.
 func (s *Store) Forget(ctx context.Context, collection string, ttl time.Duration) (int, error) {

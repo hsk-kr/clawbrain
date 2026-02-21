@@ -678,6 +678,102 @@ func TestForgetLargeTTLDeletesNothing(t *testing.T) {
 	}
 }
 
+func TestGet(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	collection := testCollection(t)
+	defer cleanupCollection(t, s, collection)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Add a memory with a known ID
+	fixedID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	_, err := s.Add(ctx, collection, fixedID, []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+		"text": "get test memory",
+		"tag":  "important",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	t.Run("fetches existing memory by ID", func(t *testing.T) {
+		result, err := s.Get(ctx, collection, fixedID)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		if result == nil {
+			t.Fatal("expected result, got nil")
+		}
+		if result.ID != fixedID {
+			t.Errorf("expected ID %q, got %q", fixedID, result.ID)
+		}
+		if result.Payload["text"] != "get test memory" {
+			t.Errorf("expected text 'get test memory', got %v", result.Payload["text"])
+		}
+		if result.Payload["tag"] != "important" {
+			t.Errorf("expected tag 'important', got %v", result.Payload["tag"])
+		}
+		if result.Payload["created_at"] == nil {
+			t.Error("missing created_at in payload")
+		}
+		if result.Payload["last_accessed"] == nil {
+			t.Error("missing last_accessed in payload")
+		}
+	})
+
+	t.Run("returns nil for nonexistent ID", func(t *testing.T) {
+		result, err := s.Get(ctx, collection, "00000000-0000-0000-0000-000000000000")
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		if result != nil {
+			t.Fatalf("expected nil for nonexistent ID, got %+v", result)
+		}
+	})
+
+	t.Run("errors on nonexistent collection", func(t *testing.T) {
+		_, err := s.Get(ctx, "nonexistent_collection_xyz", fixedID)
+		if err == nil {
+			t.Fatal("expected error for nonexistent collection")
+		}
+	})
+
+	t.Run("updates last_accessed on retrieval", func(t *testing.T) {
+		// First get
+		result1, err := s.Get(ctx, collection, fixedID)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		ts1, ok := result1.Payload["last_accessed"].(string)
+		if !ok {
+			t.Fatal("last_accessed not a string")
+		}
+
+		time.Sleep(1100 * time.Millisecond)
+
+		// Second get — last_accessed should be updated
+		result2, err := s.Get(ctx, collection, fixedID)
+		if err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		ts2, ok := result2.Payload["last_accessed"].(string)
+		if !ok {
+			t.Fatal("last_accessed not a string")
+		}
+
+		t1, err1 := time.Parse(time.RFC3339Nano, ts1)
+		t2, err2 := time.Parse(time.RFC3339Nano, ts2)
+		if err1 != nil || err2 != nil {
+			t.Fatalf("failed to parse timestamps: %v / %v", err1, err2)
+		}
+		if !t2.After(t1) {
+			t.Errorf("last_accessed not updated: %s -> %s", ts1, ts2)
+		}
+	})
+}
+
 // --- Unit Tests for helper functions ---
 
 func TestPointIDToString(t *testing.T) {

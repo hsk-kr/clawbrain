@@ -43,6 +43,8 @@ func main() {
 	switch command {
 	case "add":
 		runAdd(args[1:])
+	case "get":
+		runGet(args[1:])
 	case "search":
 		runSearch(args[1:])
 	case "forget":
@@ -102,10 +104,48 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  add            Store a memory (--text 'your text here')")
+	fmt.Fprintln(os.Stderr, "  get            Fetch a memory by ID (--id <uuid>)")
 	fmt.Fprintln(os.Stderr, "  search         Search memories (--query 'search text')")
 	fmt.Fprintln(os.Stderr, "  forget         Remove stale memories")
 	fmt.Fprintln(os.Stderr, "  collections    List all collections")
 	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant and Ollama connectivity")
+}
+
+func runGet(args []string) {
+	fs := flag.NewFlagSet("get", flag.ExitOnError)
+	collection := fs.String("collection", "", "Collection to fetch from (required)")
+	id := fs.String("id", "", "UUID of the memory to fetch (required)")
+	fs.Parse(args)
+
+	if *collection == "" {
+		fmt.Fprintln(os.Stderr, "Error: --collection is required")
+		fs.Usage()
+		os.Exit(1)
+	}
+	if *id == "" {
+		fmt.Fprintln(os.Stderr, "Error: --id is required")
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	s, ctx, cancel := connect()
+	defer cancel()
+	defer s.Close()
+
+	result, err := s.Get(ctx, *collection, *id)
+	if err != nil {
+		exitJSON("error", err.Error())
+	}
+
+	if result == nil {
+		exitJSON("error", fmt.Sprintf("memory %s not found in collection %s", *id, *collection))
+	}
+
+	outputJSON(map[string]any{
+		"status":  "ok",
+		"id":      result.ID,
+		"payload": result.Payload,
+	})
 }
 
 func runAdd(args []string) {
