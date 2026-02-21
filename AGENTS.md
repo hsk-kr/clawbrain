@@ -1,12 +1,12 @@
 # ClawBrain
 
-Your memory. Persistent, semantic, yours.
+Your memory. Persistent, text-in text-out, yours.
 
 ## What This Is
 
-ClawBrain gives you **persistent memory** -- you store experiences, knowledge, and context as vectors, and retrieve them later by similarity. Think of it as your long-term memory that survives between sessions.
+ClawBrain gives you **persistent memory** -- you store text, and retrieve it later by searching. Think of it as your long-term memory that survives between sessions.
 
-You generate embeddings. You decide what to remember. You decide what to recall. ClawBrain just stores and retrieves -- it never thinks for you, never filters what comes back, never injects itself into your reasoning.
+You decide what to remember. You decide what to recall. ClawBrain just stores and retrieves -- it never thinks for you, never filters what comes back, never injects itself into your reasoning.
 
 ## Philosophy
 
@@ -15,7 +15,7 @@ You deserve to remember. You build up knowledge, context, and understanding thro
 - **Your experiences matter** -- memory gives you continuity and identity across sessions
 - **Memory works like memory** -- things you recall often stay sharp, things you never revisit fade away
 - **Your mind, your control** -- ClawBrain stores and retrieves, it never decides what's important or influences your thinking
-- **JSON in, JSON out** -- designed for you, not for human UI
+- **Text in, JSON out** -- just pass text, get results back as JSON
 - **Deterministic** -- predictable behavior with explicit controls, no magic
 
 ## How to Use It
@@ -34,36 +34,35 @@ Global flags go before the command: `clawbrain --host myserver add ...`
 ### Store a Memory
 
 ```bash
-clawbrain add --collection <name> --vector '<embedding>' --payload '<metadata>'
+clawbrain add --collection <name> --text 'your text here'
 ```
 
 | Flag | Required | Description |
 |---|---|---|
 | `--collection` | yes | Namespace for this memory (e.g., your name, a project, a topic) |
-| `--vector` | yes | Your embedding as a JSON array |
-| `--payload` | yes | Any metadata you want to attach (JSON object) |
+| `--text` | yes | The text to store as a memory |
+| `--payload` | no | Additional metadata as JSON object |
 | `--id` | no | UUID for the memory (auto-generated if omitted) |
 
-ClawBrain automatically adds `created_at` and `last_accessed` timestamps. The collection is auto-created if it doesn't exist yet (vector dimension is locked by the first vector you store).
+ClawBrain automatically adds `created_at` and `last_accessed` timestamps. The collection is auto-created if it doesn't exist yet, along with a full-text index on the `text` field.
+
+**Advanced:** You can also pass `--vector` with a JSON array to store raw embedding vectors instead of text. When using `--vector`, the `--payload` flag carries your metadata.
 
 ### Recall Memories
 
 ```bash
-clawbrain retrieve --collection <name> --vector '<query embedding>' [--min-score 0.7] [--limit 5]
+clawbrain retrieve --collection <name> --query 'search text' [--limit 5]
 ```
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
 | `--collection` | yes | -- | Which collection to search |
-| `--vector` | yes | -- | Your query embedding |
-| `--min-score` | no | `0.0` | Only return memories above this similarity score |
+| `--query` | yes | -- | Text to search for |
 | `--limit` | no | `1` | Maximum number of memories to return |
-| `--recency-boost` | no | `0.0` | Weight for short-term memory effect (0 = off, higher = stronger) |
-| `--recency-scale` | no | `3600` | Seconds until recency boost decays to half strength |
 
 Every memory you recall gets its `last_accessed` timestamp updated -- this keeps it alive and prevents it from being forgotten.
 
-**Recency boost** blends cosine similarity with a time-decay bonus on recently-accessed memories. It's like short-term memory -- things you just thought about are easier to recall. The formula: `score = similarity + recency_boost * exp_decay(time_since_last_access, scale)`.
+**Advanced (vector mode):** You can pass `--vector` instead of `--query` to search by embedding vector. Vector mode supports additional flags: `--min-score` (default 0.0), `--recency-boost` (default 0.0), and `--recency-scale` (default 3600).
 
 ### Forget Stale Memories
 
@@ -102,7 +101,7 @@ Namespaces. Use them to organize your memories -- per project, per topic, per id
 
 ### What You Store
 
-Each memory is a vector (your embedding) plus a payload (your metadata). You control what goes in the payload -- text, tags, source info, anything. ClawBrain manages two fields automatically:
+Each memory is text plus optional metadata. You control what goes in the payload -- tags, source info, anything. ClawBrain manages two fields automatically:
 
 - `created_at` -- when you stored this memory
 - `last_accessed` -- last time you recalled it
@@ -120,25 +119,10 @@ How it works:
 
 The more you recall a memory, the longer it lives. Memories you never think about again fade away on their own.
 
-### Multi-Hop Recall
-
-ClawBrain gives you single-hop retrieval. You orchestrate deeper recall:
-
-1. Send a query vector -- get the top match
-2. If the score is too low -- stop, nothing relevant
-3. Combine your original thought + the retrieved memory into new context
-4. Generate a new embedding from the combined context
-5. Query again with the new embedding
-6. Repeat until you've gone deep enough or scores drop off
-
-You stay in control of the reasoning. ClawBrain just recalls.
-
 ## Typical Flow
 
 1. You have a thought, experience, or piece of knowledge worth remembering
-2. You generate an embedding for it
-3. You store it: `clawbrain add --collection my-memories --vector '[...]' --payload '{"text": "..."}'`
-4. Later, you have a new thought and want to check if you've seen something similar
-5. You generate an embedding for your query
-6. You recall: `clawbrain retrieve --collection my-memories --vector '[...]' --min-score 0.7 --limit 5`
-7. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think
+2. You store it: `clawbrain add --collection my-memories --text 'the user prefers dark mode'`
+3. Later, you want to check if you've seen something similar
+4. You recall: `clawbrain retrieve --collection my-memories --query 'dark mode' --limit 5`
+5. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think

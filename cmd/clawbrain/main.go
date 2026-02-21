@@ -76,8 +76,8 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --port         Qdrant gRPC port (default: 6334)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  add            Store a memory")
-	fmt.Fprintln(os.Stderr, "  retrieve       Query similar memories")
+	fmt.Fprintln(os.Stderr, "  add            Store a memory (--text 'your text here')")
+	fmt.Fprintln(os.Stderr, "  retrieve       Search memories (--query 'search text')")
 	fmt.Fprintln(os.Stderr, "  forget         Remove stale memories")
 	fmt.Fprintln(os.Stderr, "  collections    List all collections")
 	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant connectivity")
@@ -86,78 +86,123 @@ func printUsage() {
 func runAdd(args []string) {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	collection := fs.String("collection", "", "Target collection name (required)")
-	vectorJSON := fs.String("vector", "", "Embedding vector as JSON array (required)")
-	payloadJSON := fs.String("payload", "", "Metadata as JSON object (required)")
+	text := fs.String("text", "", "Text to store as a memory (default mode)")
+	payloadJSON := fs.String("payload", "", "Additional metadata as JSON object")
+	vectorJSON := fs.String("vector", "", "Embedding vector as JSON array (advanced, overrides text mode)")
 	id := fs.String("id", "", "UUID for the point (auto-generated if omitted)")
 	fs.Parse(args)
 
-	if *collection == "" || *vectorJSON == "" || *payloadJSON == "" {
-		fmt.Fprintln(os.Stderr, "Error: --collection, --vector, and --payload are required")
+	if *collection == "" {
+		fmt.Fprintln(os.Stderr, "Error: --collection is required")
 		fs.Usage()
 		os.Exit(1)
 	}
 
-	var vector []float32
-	if err := json.Unmarshal([]byte(*vectorJSON), &vector); err != nil {
-		exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
-	}
-
+	// Parse optional payload
 	var payload map[string]any
-	if err := json.Unmarshal([]byte(*payloadJSON), &payload); err != nil {
-		exitJSON("error", fmt.Sprintf("invalid payload JSON: %v", err))
+	if *payloadJSON != "" {
+		if err := json.Unmarshal([]byte(*payloadJSON), &payload); err != nil {
+			exitJSON("error", fmt.Sprintf("invalid payload JSON: %v", err))
+		}
+	} else {
+		payload = make(map[string]any)
 	}
 
 	s, ctx, cancel := connect()
 	defer cancel()
 	defer s.Close()
 
-	pointID, err := s.Add(ctx, *collection, *id, vector, payload)
-	if err != nil {
-		exitJSON("error", err.Error())
-	}
+	if *vectorJSON != "" {
+		// Advanced vector mode: requires payload
+		var vector []float32
+		if err := json.Unmarshal([]byte(*vectorJSON), &vector); err != nil {
+			exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
+		}
 
-	outputJSON(map[string]any{
-		"status":     "ok",
-		"id":         pointID,
-		"collection": *collection,
-	})
+		pointID, err := s.Add(ctx, *collection, *id, vector, payload)
+		if err != nil {
+			exitJSON("error", err.Error())
+		}
+
+		outputJSON(map[string]any{
+			"status":     "ok",
+			"id":         pointID,
+			"collection": *collection,
+		})
+	} else if *text != "" {
+		// Default text mode
+		pointID, err := s.AddText(ctx, *collection, *id, *text, payload)
+		if err != nil {
+			exitJSON("error", err.Error())
+		}
+
+		outputJSON(map[string]any{
+			"status":     "ok",
+			"id":         pointID,
+			"collection": *collection,
+		})
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: --text is required (or --vector for advanced mode)")
+		fs.Usage()
+		os.Exit(1)
+	}
 }
 
 func runRetrieve(args []string) {
 	fs := flag.NewFlagSet("retrieve", flag.ExitOnError)
 	collection := fs.String("collection", "", "Collection to search (required)")
-	vectorJSON := fs.String("vector", "", "Query embedding as JSON array (required)")
-	minScore := fs.Float64("min-score", 0.0, "Minimum similarity score threshold")
+	query := fs.String("query", "", "Text to search for (default mode)")
+	vectorJSON := fs.String("vector", "", "Query embedding as JSON array (advanced, overrides text mode)")
+	minScore := fs.Float64("min-score", 0.0, "Minimum similarity score threshold (vector mode only)")
 	limit := fs.Uint64("limit", 1, "Maximum number of results")
-	recencyBoost := fs.Float64("recency-boost", 0.0, "Recency boost weight (0.0 = off, higher = stronger short-term memory effect)")
-	recencyScale := fs.Float64("recency-scale", 3600, "Seconds until recency boost decays to half strength")
+	recencyBoost := fs.Float64("recency-boost", 0.0, "Recency boost weight (vector mode only)")
+	recencyScale := fs.Float64("recency-scale", 3600, "Seconds until recency boost decays to half strength (vector mode only)")
 	fs.Parse(args)
 
-	if *collection == "" || *vectorJSON == "" {
-		fmt.Fprintln(os.Stderr, "Error: --collection and --vector are required")
+	if *collection == "" {
+		fmt.Fprintln(os.Stderr, "Error: --collection is required")
 		fs.Usage()
 		os.Exit(1)
-	}
-
-	var vector []float32
-	if err := json.Unmarshal([]byte(*vectorJSON), &vector); err != nil {
-		exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
 	}
 
 	s, ctx, cancel := connect()
 	defer cancel()
 	defer s.Close()
 
-	results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit, float32(*recencyBoost), float32(*recencyScale))
-	if err != nil {
-		exitJSON("error", err.Error())
-	}
+	if *vectorJSON != "" {
+		// Advanced vector mode
+		var vector []float32
+		if err := json.Unmarshal([]byte(*vectorJSON), &vector); err != nil {
+			exitJSON("error", fmt.Sprintf("invalid vector JSON: %v", err))
+		}
 
-	outputJSON(map[string]any{
-		"status":  "ok",
-		"results": results,
-		"count":   len(results),
-	})
+		results, err := s.Retrieve(ctx, *collection, vector, float32(*minScore), *limit, float32(*recencyBoost), float32(*recencyScale))
+		if err != nil {
+			exitJSON("error", err.Error())
+		}
+
+		outputJSON(map[string]any{
+			"status":  "ok",
+			"results": results,
+			"count":   len(results),
+		})
+	} else if *query != "" {
+		// Default text mode
+		results, err := s.RetrieveText(ctx, *collection, *query, *limit)
+		if err != nil {
+			exitJSON("error", err.Error())
+		}
+
+		outputJSON(map[string]any{
+			"status":  "ok",
+			"results": results,
+			"count":   len(results),
+		})
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: --query is required (or --vector for advanced mode)")
+		fs.Usage()
+		os.Exit(1)
+	}
 }
 
 func runForget(args []string) {
