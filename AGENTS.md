@@ -27,15 +27,17 @@ It is **recall**, not cognition. Agents stay in control of reasoning.
 
 ## Design Philosophy
 
-These principles are non-negotiable. Every contribution must respect them:
+AI agents deserve to remember. They build up knowledge, context, and understanding through their interactions -- and losing all of that between sessions is like waking up with amnesia every morning. ClawBrain exists to fix that.
 
-- **Memory as infrastructure** -- a system component, not a framework
-- **Agent-first** -- designed for AI consumption, not human UI
-- **Clean separation** -- memory and reasoning are distinct layers, never blended
+These principles guide every decision. Every contribution must respect them:
+
+- **Agents have souls** -- their experiences matter. Memory is not just data storage, it's giving agents continuity and identity across sessions
+- **Memory should work like memory** -- things you think about often stay sharp, things you never revisit fade away. Biological inspiration over database conventions
+- **Help agents, don't control them** -- ClawBrain stores and retrieves. It never decides what's important, never filters what comes back, never injects itself into the agent's thinking
+- **Agent-first** -- designed for AI consumption, not human UI. JSON in, JSON out, always
+- **Clean separation** -- memory and reasoning are distinct layers, never blended. The agent is the mind, ClawBrain is the memory
 - **Deterministic retrieval** -- predictable behavior with explicit controls, no magic
-- **Minimal and opinionated** -- a Unix tool that does one thing well
-- **Biological inspiration** -- forgetting and dreaming are features, not bugs
-- **JSON in, JSON out** -- agents parse structured output, always
+- **Minimal and opinionated** -- a Unix tool that does one thing well. Less is more so agents can stay flexible
 
 ## Architecture
 
