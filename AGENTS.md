@@ -68,6 +68,19 @@ ClawBrain embeds your text via Ollama, stores the vector in Qdrant, and keeps th
 
 **Advanced:** You can also pass `--vector` with a JSON array to store pre-computed embedding vectors directly. When using `--vector`, the `--payload` flag carries your metadata. This bypasses Ollama entirely.
 
+### Fetch a Memory by ID
+
+```bash
+clawbrain get --collection <name> --id <uuid>
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--collection` | yes | Which collection to fetch from |
+| `--id` | yes | UUID of the memory (the one returned by `add`) |
+
+Fetches a single memory directly by its ID. This is a precise lookup, not a search. Useful when you stored a memory and kept the UUID -- you can retrieve it later without needing to reconstruct a query. Updates `last_accessed` on retrieval, just like search does.
+
 ### Search Memories
 
 ```bash
@@ -86,6 +99,8 @@ clawbrain search --collection <name> --query 'search text' [--limit 5]
 Your query is embedded via Ollama and compared against stored vectors by cosine similarity. Results are ranked by relevance -- the most semantically similar memories come first.
 
 Every memory you recall gets its `last_accessed` timestamp updated -- this keeps it alive and prevents it from being forgotten.
+
+The response includes a `count` field -- this is the number of results actually returned, which may be less than `--limit` if fewer memories matched or cleared the `--min-score` threshold.
 
 **Advanced:** You can pass `--vector` instead of `--query` to search by pre-computed embedding vector. This bypasses Ollama.
 

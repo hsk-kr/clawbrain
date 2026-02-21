@@ -22,13 +22,16 @@ We built ClawBrain to give agents what they're missing: a place to store what th
 
 ## What It Does
 
-Four commands. That's it.
+Five commands. That's it.
 
 ```bash
 # Store a memory
 clawbrain add --collection memories \
   --vector '[0.1, 0.2, 0.3, 0.4]' \
   --payload '{"text": "the user prefers dark mode"}'
+
+# Fetch a specific memory by ID
+clawbrain get --collection memories --id <uuid>
 
 # Recall similar memories
 clawbrain search --collection memories \
