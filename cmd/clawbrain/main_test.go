@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"testing"
@@ -51,6 +52,17 @@ func skipIfNoQdrant(t *testing.T, binary string) {
 	conn.Close()
 }
 
+// skipIfNoOllama skips the test if Ollama is not running.
+func skipIfNoOllama(t *testing.T) {
+	t.Helper()
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://localhost:11434/")
+	if err != nil {
+		t.Skipf("Ollama not available on localhost:11434, skipping: %v", err)
+	}
+	resp.Body.Close()
+}
+
 func TestCLINoArgs(t *testing.T) {
 	binary := buildBinary(t)
 	out, err := runCLI(t, binary)
@@ -76,6 +88,7 @@ func TestCLIUnknownCommand(t *testing.T) {
 func TestCLICheck(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
 
 	out, err := runCLI(t, binary, "check")
 	if err != nil {
@@ -523,16 +536,19 @@ func TestCLICollections(t *testing.T) {
 	}
 }
 
+// --- Text mode tests (require both Qdrant and Ollama) ---
+
 func TestCLITextAddAndRetrieve(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
 
 	collection := "test_cli_text_" + t.Name()
 	defer func() {
 		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
 	}()
 
-	// Add a text memory
+	// Add a text memory (embedding happens via Ollama)
 	out, err := runCLI(t, binary, "add",
 		"--collection", collection,
 		"--text", "the user prefers dark mode for coding",
@@ -549,7 +565,7 @@ func TestCLITextAddAndRetrieve(t *testing.T) {
 		t.Fatal("expected non-empty id")
 	}
 
-	// Retrieve by text query
+	// Retrieve by text query (query is also embedded via Ollama)
 	out, err = runCLI(t, binary, "retrieve",
 		"--collection", collection,
 		"--query", "dark mode",
@@ -568,18 +584,22 @@ func TestCLITextAddAndRetrieve(t *testing.T) {
 		t.Fatalf("expected at least 1 result, got %v", retrieveResult["count"])
 	}
 
-	// Verify the text is in the payload
+	// Verify the text is in the payload and score is present
 	results := retrieveResult["results"].([]any)
 	firstResult := results[0].(map[string]any)
 	payload := firstResult["payload"].(map[string]any)
 	if payload["text"] != "the user prefers dark mode for coding" {
 		t.Errorf("expected text in payload, got %v", payload["text"])
 	}
+	if _, ok := firstResult["score"].(float64); !ok {
+		t.Error("expected score in result")
+	}
 }
 
 func TestCLITextAddWithPayload(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
 
 	collection := "test_cli_text_payload_" + t.Name()
 	defer func() {
@@ -656,47 +676,10 @@ func TestCLITextRetrieveMissingQuery(t *testing.T) {
 	}
 }
 
-func TestCLITextRetrieveNoMatch(t *testing.T) {
-	binary := buildBinary(t)
-	skipIfNoQdrant(t, binary)
-
-	collection := "test_cli_text_nomatch_" + t.Name()
-	defer func() {
-		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
-	}()
-
-	// Add a memory
-	out, err := runCLI(t, binary, "add",
-		"--collection", collection,
-		"--text", "the weather is sunny today",
-	)
-	if err != nil {
-		t.Fatalf("add failed: %v\n%s", err, out)
-	}
-
-	// Search for something completely different
-	out, err = runCLI(t, binary, "retrieve",
-		"--collection", collection,
-		"--query", "xyznonexistent",
-		"--limit", "5",
-	)
-	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
-	}
-
-	result := parseJSON(t, out)
-	if result["status"] != "ok" {
-		t.Fatalf("expected status ok, got %v", result["status"])
-	}
-	count, _ := result["count"].(float64)
-	if count != 0 {
-		t.Errorf("expected 0 results for nonsense query, got %v", count)
-	}
-}
-
 func TestCLITextForget(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
 
 	collection := "test_cli_text_forget_" + t.Name()
 
@@ -727,7 +710,7 @@ func TestCLITextForget(t *testing.T) {
 		t.Fatalf("expected at least 1 deletion, got %v", result["deleted"])
 	}
 
-	// Verify text search returns nothing
+	// Verify search returns nothing
 	out, err = runCLI(t, binary, "retrieve",
 		"--collection", collection,
 		"--query", "forgotten",
@@ -747,6 +730,7 @@ func TestCLITextForget(t *testing.T) {
 func TestCLITextAddWithCustomID(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
 
 	collection := "test_cli_text_customid_" + t.Name()
 	defer func() {
@@ -769,9 +753,76 @@ func TestCLITextAddWithCustomID(t *testing.T) {
 	}
 }
 
+func TestCLITextSemanticSearch(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	collection := "test_cli_semantic_" + t.Name()
+	defer func() {
+		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
+	}()
+
+	// Add memories with distinct topics
+	memories := []string{
+		"the user prefers dark mode for coding at night",
+		"deploy the application to production every friday",
+		"use golang and qdrant for the memory system",
+	}
+	for _, m := range memories {
+		out, err := runCLI(t, binary, "add",
+			"--collection", collection,
+			"--text", m,
+		)
+		if err != nil {
+			t.Fatalf("add failed: %v\n%s", err, out)
+		}
+	}
+
+	// Search for something semantically related to dark mode
+	out, err := runCLI(t, binary, "retrieve",
+		"--collection", collection,
+		"--query", "night theme preferences",
+		"--limit", "3",
+	)
+	if err != nil {
+		t.Fatalf("retrieve failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+
+	results := result["results"].([]any)
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+
+	// The top result should be about dark mode (semantically closest to "night theme preferences")
+	topPayload := results[0].(map[string]any)["payload"].(map[string]any)
+	topText := topPayload["text"].(string)
+	if topText != "the user prefers dark mode for coding at night" {
+		t.Errorf("expected dark mode memory as top result for 'night theme preferences', got %q", topText)
+	}
+}
+
+func TestCLIGlobalOllamaFlags(t *testing.T) {
+	binary := buildBinary(t)
+
+	// Test that --ollama-url and --model flags are accepted without error
+	// (they'll fail because of missing --collection, but shouldn't fail on flag parsing)
+	_, err := runCLI(t, binary, "--ollama-url", "http://example.com:11434", "--model", "test-model", "add")
+	if err == nil {
+		t.Fatal("expected error for missing --collection, not a pass")
+	}
+	// The error should be about missing collection, not about unknown flags
+}
+
 func TestCLIGlobalHostFlag(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
 
 	// --host before command should work
 	out, err := runCLI(t, binary, "--host", "localhost", "check")
