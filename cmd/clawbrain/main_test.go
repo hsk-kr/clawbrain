@@ -124,11 +124,11 @@ func TestCLIAddMissingFlags(t *testing.T) {
 	}
 }
 
-func TestCLIAddAndRetrieve(t *testing.T) {
+func TestCLIAddAndSearch(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
-	collection := "test_cli_add_retrieve_" + t.Name()
+	collection := "test_cli_add_search_" + t.Name()
 
 	// Cleanup at the end by forgetting everything
 	defer func() {
@@ -153,23 +153,23 @@ func TestCLIAddAndRetrieve(t *testing.T) {
 		t.Fatal("expected non-empty id")
 	}
 
-	// Retrieve it
-	out, err = runCLI(t, binary, "retrieve",
+	// Search for it
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--min-score", "0.9",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
-	retrieveResult := parseJSON(t, out)
-	if retrieveResult["status"] != "ok" {
-		t.Fatalf("expected status ok, got %v", retrieveResult["status"])
+	searchResult := parseJSON(t, out)
+	if searchResult["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", searchResult["status"])
 	}
-	count, ok := retrieveResult["count"].(float64)
+	count, ok := searchResult["count"].(float64)
 	if !ok || count < 1 {
-		t.Fatalf("expected at least 1 result, got %v", retrieveResult["count"])
+		t.Fatalf("expected at least 1 result, got %v", searchResult["count"])
 	}
 }
 
@@ -200,17 +200,17 @@ func TestCLIAddWithCustomID(t *testing.T) {
 	}
 }
 
-func TestCLIRetrieveMissingFlags(t *testing.T) {
+func TestCLISearchMissingFlags(t *testing.T) {
 	binary := buildBinary(t)
 
 	tests := []struct {
 		name string
 		args []string
 	}{
-		{"no flags", []string{"retrieve"}},
-		{"missing query and vector", []string{"retrieve", "--collection", "test"}},
-		{"missing collection", []string{"retrieve", "--query", "hello"}},
-		{"missing collection with vector", []string{"retrieve", "--vector", "[0.1]"}},
+		{"no flags", []string{"search"}},
+		{"missing query and vector", []string{"search", "--collection", "test"}},
+		{"missing collection", []string{"search", "--query", "hello"}},
+		{"missing collection with vector", []string{"search", "--vector", "[0.1]"}},
 	}
 
 	for _, tt := range tests {
@@ -257,24 +257,24 @@ func TestCLIForget(t *testing.T) {
 		t.Fatalf("expected at least 1 deletion, got %v", result["deleted"])
 	}
 
-	// Verify collection is empty
-	out, err = runCLI(t, binary, "retrieve",
+	// Verify collection is empty via search
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--limit", "10",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
-	retrieveResult := parseJSON(t, out)
-	count, _ := retrieveResult["count"].(float64)
+	searchResult := parseJSON(t, out)
+	count, _ := searchResult["count"].(float64)
 	if count != 0 {
 		t.Errorf("expected 0 results after forget, got %v", count)
 	}
 }
 
-func TestCLIRetrieveWithRecencyBoost(t *testing.T) {
+func TestCLISearchWithRecencyBoost(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
@@ -293,15 +293,15 @@ func TestCLIRetrieveWithRecencyBoost(t *testing.T) {
 		t.Fatalf("add failed: %v\n%s", err, out)
 	}
 
-	// Retrieve with recency boost
-	out, err = runCLI(t, binary, "retrieve",
+	// Search with recency boost
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--recency-boost", "0.5",
 		"--recency-scale", "3600",
 	)
 	if err != nil {
-		t.Fatalf("retrieve with recency boost failed: %v\n%s", err, out)
+		t.Fatalf("search with recency boost failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -331,7 +331,7 @@ func TestCLIRetrieveWithRecencyBoost(t *testing.T) {
 	}
 }
 
-func TestCLIRetrieveRecencyBoostDefaultOff(t *testing.T) {
+func TestCLISearchRecencyBoostDefaultOff(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
@@ -350,13 +350,13 @@ func TestCLIRetrieveRecencyBoostDefaultOff(t *testing.T) {
 		t.Fatalf("add failed: %v\n%s", err, out)
 	}
 
-	// Retrieve WITHOUT recency flags — should work as pure similarity
-	out, err = runCLI(t, binary, "retrieve",
+	// Search WITHOUT recency flags — should work as pure similarity
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.5, 0.5, 0.5, 0.5]",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -376,7 +376,7 @@ func TestCLIRetrieveRecencyBoostDefaultOff(t *testing.T) {
 	}
 }
 
-func TestCLIAddRetrievePreservesPayload(t *testing.T) {
+func TestCLIAddSearchPreservesPayload(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
@@ -395,14 +395,14 @@ func TestCLIAddRetrievePreservesPayload(t *testing.T) {
 		t.Fatalf("add failed: %v\n%s", err, out)
 	}
 
-	// Retrieve and check payload fields
-	out, err = runCLI(t, binary, "retrieve",
+	// Search and check payload fields
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 		"--min-score", "0.9",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -538,7 +538,7 @@ func TestCLICollections(t *testing.T) {
 
 // --- Text mode tests (require both Qdrant and Ollama) ---
 
-func TestCLITextAddAndRetrieve(t *testing.T) {
+func TestCLITextAddAndSearch(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
@@ -565,27 +565,27 @@ func TestCLITextAddAndRetrieve(t *testing.T) {
 		t.Fatal("expected non-empty id")
 	}
 
-	// Retrieve by text query (query is also embedded via Ollama)
-	out, err = runCLI(t, binary, "retrieve",
+	// Search by text query (query is also embedded via Ollama)
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--query", "dark mode",
 		"--limit", "5",
 	)
 	if err != nil {
-		t.Fatalf("retrieve text failed: %v\n%s", err, out)
+		t.Fatalf("search text failed: %v\n%s", err, out)
 	}
 
-	retrieveResult := parseJSON(t, out)
-	if retrieveResult["status"] != "ok" {
-		t.Fatalf("expected status ok, got %v", retrieveResult["status"])
+	searchResult := parseJSON(t, out)
+	if searchResult["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", searchResult["status"])
 	}
-	count, ok := retrieveResult["count"].(float64)
+	count, ok := searchResult["count"].(float64)
 	if !ok || count < 1 {
-		t.Fatalf("expected at least 1 result, got %v", retrieveResult["count"])
+		t.Fatalf("expected at least 1 result, got %v", searchResult["count"])
 	}
 
 	// Verify the text is in the payload and score is present
-	results := retrieveResult["results"].([]any)
+	results := searchResult["results"].([]any)
 	firstResult := results[0].(map[string]any)
 	payload := firstResult["payload"].(map[string]any)
 	if payload["text"] != "the user prefers dark mode for coding" {
@@ -621,14 +621,14 @@ func TestCLITextAddWithPayload(t *testing.T) {
 		t.Fatalf("expected status ok, got %v", addResult["status"])
 	}
 
-	// Retrieve and check payload
-	out, err = runCLI(t, binary, "retrieve",
+	// Search and check payload
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--query", "golang",
 		"--limit", "5",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -664,11 +664,11 @@ func TestCLITextAddMissingText(t *testing.T) {
 	}
 }
 
-func TestCLITextRetrieveMissingQuery(t *testing.T) {
+func TestCLITextSearchMissingQuery(t *testing.T) {
 	binary := buildBinary(t)
 
 	// No --query and no --vector should fail
-	_, err := runCLI(t, binary, "retrieve",
+	_, err := runCLI(t, binary, "search",
 		"--collection", "test",
 	)
 	if err == nil {
@@ -711,17 +711,17 @@ func TestCLITextForget(t *testing.T) {
 	}
 
 	// Verify search returns nothing
-	out, err = runCLI(t, binary, "retrieve",
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--query", "forgotten",
 		"--limit", "10",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
-	retrieveResult := parseJSON(t, out)
-	count, _ := retrieveResult["count"].(float64)
+	searchResult := parseJSON(t, out)
+	count, _ := searchResult["count"].(float64)
 	if count != 0 {
 		t.Errorf("expected 0 results after forget, got %v", count)
 	}
@@ -780,13 +780,13 @@ func TestCLITextSemanticSearch(t *testing.T) {
 	}
 
 	// Search for something semantically related to dark mode
-	out, err := runCLI(t, binary, "retrieve",
+	out, err := runCLI(t, binary, "search",
 		"--collection", collection,
 		"--query", "night theme preferences",
 		"--limit", "3",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -856,13 +856,13 @@ func TestCLIConfidenceFieldPresent(t *testing.T) {
 		t.Fatalf("add failed: %v\n%s", err, out)
 	}
 
-	// Retrieve — response should include confidence field
-	out, err = runCLI(t, binary, "retrieve",
+	// Search — response should include confidence field
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -884,7 +884,7 @@ func TestCLIConfidenceHigh(t *testing.T) {
 		runCLI(t, binary, "forget", "--collection", collection, "--ttl", "0s")
 	}()
 
-	// Add and retrieve with identical vector — score ~1.0, should be "high"
+	// Add and search with identical vector — score ~1.0, should be "high"
 	out, err := runCLI(t, binary, "add",
 		"--collection", collection,
 		"--vector", "[0.5, 0.5, 0.5, 0.5]",
@@ -894,12 +894,12 @@ func TestCLIConfidenceHigh(t *testing.T) {
 		t.Fatalf("add failed: %v\n%s", err, out)
 	}
 
-	out, err = runCLI(t, binary, "retrieve",
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.5, 0.5, 0.5, 0.5]",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -927,13 +927,13 @@ func TestCLIConfidenceNone(t *testing.T) {
 		t.Fatalf("add failed: %v\n%s", err, out)
 	}
 
-	out, err = runCLI(t, binary, "retrieve",
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.9, -0.9, 0.9, -0.9]",
 		"--min-score", "0.99",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -967,12 +967,12 @@ func TestCLIConfidenceLow(t *testing.T) {
 	}
 
 	// Query with a nearly orthogonal vector — score should be close to 0
-	out, err = runCLI(t, binary, "retrieve",
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--vector", "[0.01, 1.0, 0.0, 0.0]",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -1009,13 +1009,13 @@ func TestCLIConfidenceWithTextQuery(t *testing.T) {
 	}
 
 	// Query with semantically related text — should have confidence field
-	out, err = runCLI(t, binary, "retrieve",
+	out, err = runCLI(t, binary, "search",
 		"--collection", collection,
 		"--query", "cat sitting on a mat",
 		"--limit", "3",
 	)
 	if err != nil {
-		t.Fatalf("retrieve failed: %v\n%s", err, out)
+		t.Fatalf("search failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)

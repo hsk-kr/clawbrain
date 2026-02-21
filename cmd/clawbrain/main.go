@@ -43,8 +43,8 @@ func main() {
 	switch command {
 	case "add":
 		runAdd(args[1:])
-	case "retrieve":
-		runRetrieve(args[1:])
+	case "search":
+		runSearch(args[1:])
 	case "forget":
 		runForget(args[1:])
 	case "collections":
@@ -102,7 +102,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  add            Store a memory (--text 'your text here')")
-	fmt.Fprintln(os.Stderr, "  retrieve       Search memories (--query 'search text')")
+	fmt.Fprintln(os.Stderr, "  search         Search memories (--query 'search text')")
 	fmt.Fprintln(os.Stderr, "  forget         Remove stale memories")
 	fmt.Fprintln(os.Stderr, "  collections    List all collections")
 	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant and Ollama connectivity")
@@ -182,8 +182,8 @@ func runAdd(args []string) {
 	}
 }
 
-func runRetrieve(args []string) {
-	fs := flag.NewFlagSet("retrieve", flag.ExitOnError)
+func runSearch(args []string) {
+	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	collection := fs.String("collection", "", "Collection to search (required)")
 	query := fs.String("query", "", "Text to search for (default mode)")
 	vectorJSON := fs.String("vector", "", "Query embedding as JSON array (advanced, overrides text mode)")
