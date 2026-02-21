@@ -921,3 +921,52 @@ func TestCollections(t *testing.T) {
 		t.Errorf("expected to find %q in collections list, got %v", collection, names)
 	}
 }
+
+func TestForgetSkipsPinnedMemories(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+
+	collection := testCollection(t)
+	defer cleanupCollection(t, s, collection)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Add a pinned memory
+	pinnedID, err := s.Add(ctx, collection, "", []float32{0.1, 0.2, 0.3, 0.4}, map[string]any{
+		"text":   "important pinned memory",
+		"pinned": true,
+	})
+	if err != nil {
+		t.Fatalf("Add pinned failed: %v", err)
+	}
+
+	// Add an unpinned memory
+	_, err = s.Add(ctx, collection, "", []float32{0.5, 0.6, 0.7, 0.8}, map[string]any{
+		"text": "ephemeral memory",
+	})
+	if err != nil {
+		t.Fatalf("Add unpinned failed: %v", err)
+	}
+
+	// Wait so both memories become stale
+	time.Sleep(1100 * time.Millisecond)
+
+	// Forget with a short TTL — only the unpinned one should be deleted
+	deleted, err := s.Forget(ctx, collection, 1*time.Second)
+	if err != nil {
+		t.Fatalf("Forget failed: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected 1 deletion (the unpinned memory), got %d", deleted)
+	}
+
+	// The pinned one should still be there
+	result, err := s.Get(ctx, collection, pinnedID)
+	if err != nil {
+		t.Fatalf("Get pinned memory failed: %v", err)
+	}
+	if result.Payload["text"] != "important pinned memory" {
+		t.Errorf("expected pinned memory text, got %v", result.Payload["text"])
+	}
+}
