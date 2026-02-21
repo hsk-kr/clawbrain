@@ -1,0 +1,15 @@
+# Qdrant data
+qdrant_storage/
+
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test binary
+*.test
+
+# Go coverage
+*.out
