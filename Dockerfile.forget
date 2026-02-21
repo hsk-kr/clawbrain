@@ -1,5 +1,12 @@
+FROM golang:1.25 AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /clawbrain ./cmd/clawbrain
+
 FROM alpine:3.21
-COPY build/clawbrain-linux-amd64 /usr/local/bin/clawbrain
+COPY --from=builder /clawbrain /usr/local/bin/clawbrain
 COPY forget.sh /usr/local/bin/forget.sh
 RUN chmod +x /usr/local/bin/clawbrain /usr/local/bin/forget.sh
 ENTRYPOINT ["/usr/local/bin/forget.sh"]

@@ -9,8 +9,6 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    ports:
-      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
@@ -39,6 +37,19 @@ services:
       - CLAWBRAIN_HOST=qdrant
       - CLAWBRAIN_TTL=720h
       - CLAWBRAIN_INTERVAL=3600
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    depends_on:
+      - qdrant
+      - ollama
+    environment:
+      - CLAWBRAIN_HOST=qdrant
+      - CLAWBRAIN_OLLAMA_URL=http://ollama:11434
+    stdin_open: true
     restart: unless-stopped
 
 volumes:
