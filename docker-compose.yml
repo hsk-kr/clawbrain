@@ -39,17 +39,16 @@ services:
       - CLAWBRAIN_INTERVAL=3600
     restart: unless-stopped
 
-  mcp:
+  clawbrain:
     build:
       context: .
-      dockerfile: Dockerfile.mcp
+      dockerfile: Dockerfile.clawbrain
     depends_on:
       - qdrant
       - ollama
     environment:
       - CLAWBRAIN_HOST=qdrant
       - CLAWBRAIN_OLLAMA_URL=http://ollama:11434
-    stdin_open: true
     restart: unless-stopped
 
 volumes:

@@ -1,18 +1,20 @@
 {
   "name": "@clawbrain/openclaw-plugin",
   "version": "1.0.0",
-  "description": "OpenClaw plugin for ClawBrain persistent semantic memory via MCP",
+  "description": "OpenClaw plugin for ClawBrain persistent semantic memory",
   "openclaw": {
-    "extensions": [
-      "./index.ts"
-    ]
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
     "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0",
-    "typescript": "^5.9.3"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }

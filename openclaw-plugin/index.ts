@@ -1,70 +1,103 @@
-import { Client } from "@modelcontextprotocol/sdk/client";
-// @ts-expect-error -- subpath resolves at runtime via jiti; tsc cannot follow the "./*" wildcard export
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio";
+import { execFile } from "node:child_process";
 import { Type } from "@sinclair/typebox";
 
-let mcpClient: Client | null = null;
-let transport: InstanceType<typeof StdioClientTransport> | null = null;
+// ---------------------------------------------------------------------------
+// Execution layer — runs clawbrain CLI via Docker or directly
+// ---------------------------------------------------------------------------
 
-async function getClient(
-  mcpBinary: string,
-  env: Record<string, string>,
-): Promise<Client> {
-  if (mcpClient) return mcpClient;
-
-  transport = new StdioClientTransport({
-    command: mcpBinary,
-    env: { ...process.env, ...env } as Record<string, string>,
-  });
-
-  mcpClient = new Client({
-    name: "openclaw-clawbrain",
-    version: "1.0.0",
-  });
-
-  await mcpClient.connect(transport);
-  return mcpClient;
+interface PluginConfig {
+  composePath?: string;
+  serviceName?: string;
+  binaryPath?: string;
 }
 
-function resolveConfig(api: any): {
-  mcpBinary: string;
-  env: Record<string, string>;
-} {
-  const pluginConfig =
-    api.config?.plugins?.entries?.clawbrain?.config ?? {};
+function resolveConfig(api: any): PluginConfig {
+  const cfg = api.config?.plugins?.entries?.clawbrain?.config ?? {};
   return {
-    mcpBinary: pluginConfig.mcpBinary || "clawbrain-mcp",
-    env: pluginConfig.env ?? {},
+    composePath: cfg.composePath,
+    serviceName: cfg.serviceName || "clawbrain",
+    binaryPath: cfg.binaryPath,
   };
 }
 
-async function callTool(
-  api: any,
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<string> {
-  const { mcpBinary, env } = resolveConfig(api);
-  const client = await getClient(mcpBinary, env);
-  const result = await client.callTool({ name: toolName, arguments: args });
-
-  const textParts = (result.content as Array<{ type: string; text?: string }>)
-    .filter((c) => c.type === "text" && c.text)
-    .map((c) => c.text!);
-
-  return textParts.join("\n");
+function execPromise(
+  cmd: string,
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        // CLI returns JSON errors on stdout with exit code 0 in some cases,
+        // but real failures (binary not found, docker not running) come here.
+        // If we got stdout, treat it as a result anyway (the CLI writes JSON
+        // errors to stdout with exit code 1).
+        if (stdout && stdout.trim()) {
+          resolve({ stdout: stdout.trim(), stderr: stderr?.trim() ?? "" });
+          return;
+        }
+        reject(new Error(stderr?.trim() || err.message));
+        return;
+      }
+      resolve({ stdout: stdout.trim(), stderr: stderr?.trim() ?? "" });
+    });
+  });
 }
 
+/**
+ * Run a clawbrain CLI command and return the raw JSON string.
+ *
+ * Two modes:
+ * - Binary mode (binaryPath set): runs the binary directly
+ * - Docker mode (default): docker compose exec -T <service> clawbrain ...
+ */
+async function runClawbrain(
+  config: PluginConfig,
+  args: string[],
+): Promise<string> {
+  if (config.binaryPath) {
+    const { stdout } = await execPromise(config.binaryPath, args);
+    return stdout;
+  }
+
+  const composeArgs: string[] = [];
+  if (config.composePath) {
+    composeArgs.push("-f", `${config.composePath}/docker-compose.yml`);
+  }
+  composeArgs.push("exec", "-T", config.serviceName!, "clawbrain", ...args);
+
+  const { stdout } = await execPromise("docker", ["compose", ...composeArgs]);
+  return stdout;
+}
+
+// ---------------------------------------------------------------------------
+// Tool result helpers
+// ---------------------------------------------------------------------------
+
+function textResult(text: string) {
+  return { content: [{ type: "text" as const, text }] };
+}
+
+function errResult(msg: string) {
+  return { content: [{ type: "text" as const, text: JSON.stringify({ status: "error", message: msg }) }] };
+}
+
+// ---------------------------------------------------------------------------
+// Plugin registration
+// ---------------------------------------------------------------------------
+
 export default function register(api: any) {
-  // --- memory_add ---
+  const config = resolveConfig(api);
+
+  // --- memory_add -----------------------------------------------------------
   api.registerTool({
     name: "memory_add",
     description:
-      "Store a memory. Text is embedded and stored in the vector database. Returns the memory's UUID. Use pinned for memories that should never expire.",
+      "Store a memory. Text is embedded via Ollama and stored in the vector database. Returns the memory's UUID.",
     parameters: Type.Object({
       text: Type.String({ description: "The text to store as a memory" }),
       payload: Type.Optional(
-        Type.Record(Type.String(), Type.Any(), {
-          description: "Additional metadata as a JSON object",
+        Type.String({
+          description: "Additional metadata as a JSON string (e.g. '{\"source\": \"chat\"}')",
         }),
       ),
       id: Type.Optional(
@@ -78,25 +111,38 @@ export default function register(api: any) {
         }),
       ),
     }),
-    async execute(_id: string, params: any) {
-      const text = await callTool(api, "add", params);
-      return { content: [{ type: "text", text }] };
+    async execute(_id: string, params: { text: string; payload?: string; id?: string; pinned?: boolean }) {
+      try {
+        const args = ["add", "--text", params.text];
+        if (params.payload) {
+          args.push("--payload", params.payload);
+        }
+        if (params.id) {
+          args.push("--id", params.id);
+        }
+        if (params.pinned) {
+          args.push("--pinned");
+        }
+        const stdout = await runClawbrain(config, args);
+        return textResult(stdout);
+      } catch (e: any) {
+        return errResult(e.message);
+      }
     },
   });
 
-  // --- memory_search ---
+  // --- memory_search --------------------------------------------------------
   api.registerTool({
     name: "memory_search",
     description:
-      "Search memories by semantic similarity. Returns ranked results with similarity scores and a confidence level (high/medium/low/none). Call multiple times with different queries to deepen recall -- if confidence is low or none, rephrase and try again.",
+      "Search memories by semantic similarity. Your query is embedded and compared against stored memories. Returns ranked results with similarity scores and a confidence level (high/medium/low/none). Call this multiple times with different or refined queries to deepen recall. If confidence is 'low' or 'none', rephrase your query or try a different angle before giving up. Increase the limit to 3-5 for broader context per search.",
     parameters: Type.Object({
       query: Type.String({
         description: "Text to search for (semantic search)",
       }),
       limit: Type.Optional(
         Type.Integer({
-          description:
-            "Maximum number of results (default 1). Use 3-5 for broader context.",
+          description: "Maximum number of results (default 1). Use 3-5 for broader context.",
           minimum: 1,
         }),
       ),
@@ -108,13 +154,24 @@ export default function register(api: any) {
         }),
       ),
     }),
-    async execute(_id: string, params: any) {
-      const text = await callTool(api, "search", params);
-      return { content: [{ type: "text", text }] };
+    async execute(_id: string, params: { query: string; limit?: number; min_score?: number }) {
+      try {
+        const args = ["search", "--query", params.query];
+        if (params.limit !== undefined) {
+          args.push("--limit", String(params.limit));
+        }
+        if (params.min_score !== undefined) {
+          args.push("--min-score", String(params.min_score));
+        }
+        const stdout = await runClawbrain(config, args);
+        return textResult(stdout);
+      } catch (e: any) {
+        return errResult(e.message);
+      }
     },
   });
 
-  // --- memory_get ---
+  // --- memory_get -----------------------------------------------------------
   api.registerTool({
     name: "memory_get",
     description:
@@ -122,18 +179,22 @@ export default function register(api: any) {
     parameters: Type.Object({
       id: Type.String({ description: "UUID of the memory to fetch" }),
     }),
-    async execute(_id: string, params: any) {
-      const text = await callTool(api, "get", params);
-      return { content: [{ type: "text", text }] };
+    async execute(_id: string, params: { id: string }) {
+      try {
+        const stdout = await runClawbrain(config, ["get", "--id", params.id]);
+        return textResult(stdout);
+      } catch (e: any) {
+        return errResult(e.message);
+      }
     },
   });
 
-  // --- memory_forget ---
+  // --- memory_forget --------------------------------------------------------
   api.registerTool(
     {
       name: "memory_forget",
       description:
-        "Prune stale memories. Deletes memories not accessed within the TTL window. Pinned memories are never deleted.",
+        "Prune stale memories. Deletes memories not accessed within the TTL window. Pinned memories are never deleted. Returns the count of deleted memories.",
       parameters: Type.Object({
         ttl: Type.Optional(
           Type.String({
@@ -142,36 +203,40 @@ export default function register(api: any) {
           }),
         ),
       }),
-      async execute(_id: string, params: any) {
-        const text = await callTool(api, "forget", params);
-        return { content: [{ type: "text", text }] };
+      async execute(_id: string, params: { ttl?: string }) {
+        try {
+          const args = ["forget"];
+          if (params.ttl) {
+            args.push("--ttl", params.ttl);
+          }
+          const stdout = await runClawbrain(config, args);
+          return textResult(stdout);
+        } catch (e: any) {
+          return errResult(e.message);
+        }
       },
     },
     { optional: true },
   );
 
-  // --- memory_check ---
+  // --- memory_check ---------------------------------------------------------
   api.registerTool({
     name: "memory_check",
     description:
       "Verify connectivity to Qdrant (vector database) and Ollama (embedding model). Run this to confirm the memory system is operational.",
     parameters: Type.Object({}),
-    async execute(_id: string, _params: any) {
-      const text = await callTool(api, "check", {});
-      return { content: [{ type: "text", text }] };
-    },
-  });
-
-  // Clean up MCP connection on gateway shutdown
-  api.registerService({
-    id: "clawbrain-mcp",
-    start: () => api.logger?.info?.("ClawBrain MCP plugin loaded"),
-    stop: async () => {
-      if (transport) {
-        await transport.close();
-        transport = null;
-        mcpClient = null;
+    async execute() {
+      try {
+        const stdout = await runClawbrain(config, ["check"]);
+        return textResult(stdout);
+      } catch (e: any) {
+        return errResult(e.message);
       }
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Export internals for testing
+// ---------------------------------------------------------------------------
+export { runClawbrain, resolveConfig, type PluginConfig };

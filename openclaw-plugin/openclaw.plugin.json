@@ -7,24 +7,32 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "mcpBinary": {
+      "composePath": {
         "type": "string",
-        "description": "Path to the clawbrain-mcp binary. Defaults to 'clawbrain-mcp' on PATH."
+        "description": "Path to the directory containing docker-compose.yml. If omitted, docker compose uses its default project discovery."
       },
-      "env": {
-        "type": "object",
-        "description": "Environment variables passed to the MCP server process.",
-        "additionalProperties": { "type": "string" }
+      "serviceName": {
+        "type": "string",
+        "description": "Docker Compose service name for the clawbrain container. Defaults to 'clawbrain'."
+      },
+      "binaryPath": {
+        "type": "string",
+        "description": "Direct path to the clawbrain binary. When set, skips Docker and calls the binary directly. Useful for CI or host-installed setups."
       }
     }
   },
   "uiHints": {
-    "mcpBinary": {
-      "label": "MCP Binary Path",
-      "placeholder": "clawbrain-mcp"
+    "composePath": {
+      "label": "Docker Compose Path",
+      "placeholder": "/path/to/clawbrain"
     },
-    "env": {
-      "label": "Environment Variables"
+    "serviceName": {
+      "label": "Service Name",
+      "placeholder": "clawbrain"
+    },
+    "binaryPath": {
+      "label": "Binary Path (skip Docker)",
+      "placeholder": "/usr/local/bin/clawbrain"
     }
   }
 }
