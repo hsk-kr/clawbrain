@@ -40,7 +40,7 @@ body:
       label: Proposed solution
       description: Desired behavior, CLI interface, or JSON contract.
       placeholder: |
-        clawbrain retrieve-batch --collection X --vectors '[[0.1, 0.2], [0.3, 0.4]]' --limit 3
+        clawbrain search-batch --vectors '[[0.1, 0.2], [0.3, 0.4]]' --limit 3
 
         Returns: {"status":"ok","results":[[...], [...]],"count":2}
     validations:

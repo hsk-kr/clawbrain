@@ -1231,6 +1231,144 @@ func TestCLIDedupMergeVectorMode(t *testing.T) {
 	}
 }
 
+func TestCLIDedupMergeMultipleDuplicates(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	defer cleanupMemories(t)
+
+	// Create 3 duplicates using --no-merge so they all coexist
+	ids := make([]string, 3)
+	for i := 0; i < 3; i++ {
+		out, err := runCLI(t, binary, "add",
+			"--text", "the capital of France is Paris",
+			"--no-merge",
+		)
+		if err != nil {
+			t.Fatalf("add #%d failed: %v\n%s", i+1, err, out)
+		}
+		r := parseJSON(t, out)
+		if r["status"] != "ok" {
+			t.Fatalf("add #%d: expected status ok, got %v", i+1, r["status"])
+		}
+		ids[i] = r["id"].(string)
+	}
+
+	// Verify all 3 exist
+	out, err := runCLI(t, binary, "search",
+		"--query", "the capital of France is Paris",
+		"--limit", "10",
+	)
+	if err != nil {
+		t.Fatalf("search failed: %v\n%s", err, out)
+	}
+	search := parseJSON(t, out)
+	if int(search["returned"].(float64)) != 3 {
+		t.Fatalf("expected 3 memories before merge, got %v", search["returned"])
+	}
+
+	// Add the same text WITH merge enabled — should delete all 3 and replace
+	out, err = runCLI(t, binary, "add",
+		"--text", "the capital of France is Paris",
+	)
+	if err != nil {
+		t.Fatalf("merge add failed: %v\n%s", err, out)
+	}
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+
+	// merged_ids should contain all 3 old IDs
+	mergedIDs, ok := result["merged_ids"].([]any)
+	if !ok {
+		t.Fatalf("expected merged_ids to be an array, got %T: %v", result["merged_ids"], result["merged_ids"])
+	}
+	if len(mergedIDs) != 3 {
+		t.Errorf("expected 3 merged_ids, got %d: %v", len(mergedIDs), mergedIDs)
+	}
+
+	// Backward compat: merged_id should still be present
+	if result["merged_id"] == nil {
+		t.Errorf("expected merged_id for backward compat, got nil")
+	}
+
+	// There should be exactly 1 memory now
+	out, err = runCLI(t, binary, "search",
+		"--query", "the capital of France is Paris",
+		"--limit", "10",
+	)
+	if err != nil {
+		t.Fatalf("search after merge failed: %v\n%s", err, out)
+	}
+	search = parseJSON(t, out)
+	returned := int(search["returned"].(float64))
+	if returned != 1 {
+		t.Fatalf("expected 1 memory after merge, got %d", returned)
+	}
+}
+
+func TestCLIDedupMergeMultiplePreservesOldestCreatedAt(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	defer cleanupMemories(t)
+
+	// Add first memory normally (will get the earliest created_at)
+	out, err := runCLI(t, binary, "add",
+		"--text", "dogs are loyal companions",
+	)
+	if err != nil {
+		t.Fatalf("first add failed: %v\n%s", err, out)
+	}
+	first := parseJSON(t, out)
+	firstID := first["id"].(string)
+
+	// Fetch original created_at
+	out, err = runCLI(t, binary, "get", "--id", firstID)
+	if err != nil {
+		t.Fatalf("get failed: %v\n%s", err, out)
+	}
+	firstGet := parseJSON(t, out)
+	originalCreatedAt := firstGet["payload"].(map[string]any)["created_at"].(string)
+
+	time.Sleep(1100 * time.Millisecond)
+
+	// Add a second duplicate via --no-merge
+	out, err = runCLI(t, binary, "add",
+		"--text", "dogs are loyal companions",
+		"--no-merge",
+	)
+	if err != nil {
+		t.Fatalf("second add failed: %v\n%s", err, out)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+
+	// Now merge all — should preserve the original (oldest) created_at
+	out, err = runCLI(t, binary, "add",
+		"--text", "dogs are loyal companions",
+	)
+	if err != nil {
+		t.Fatalf("merge add failed: %v\n%s", err, out)
+	}
+	result := parseJSON(t, out)
+	newID := result["id"].(string)
+
+	out, err = runCLI(t, binary, "get", "--id", newID)
+	if err != nil {
+		t.Fatalf("get merged failed: %v\n%s", err, out)
+	}
+	merged := parseJSON(t, out)
+	mergedCreatedAt := merged["payload"].(map[string]any)["created_at"].(string)
+
+	if mergedCreatedAt != originalCreatedAt {
+		t.Errorf("created_at not preserved from oldest duplicate: original=%s, merged=%s", originalCreatedAt, mergedCreatedAt)
+	}
+}
+
 // --- Collections command removed ---
 
 func TestCLICollectionsCommandRemoved(t *testing.T) {

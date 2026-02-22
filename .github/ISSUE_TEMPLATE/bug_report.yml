@@ -22,7 +22,7 @@ body:
     attributes:
       label: Summary
       description: One-sentence statement of what is broken.
-      placeholder: "clawbrain retrieve returns empty results for vectors that were just added via clawbrain add."
+      placeholder: "clawbrain search returns empty results for vectors that were just added via clawbrain add."
     validations:
       required: true
   - type: textarea
@@ -32,8 +32,8 @@ body:
       description: Provide the shortest deterministic repro path. Include exact CLI commands.
       placeholder: |
         1. docker compose up -d
-        2. clawbrain add --collection test --vector '[0.1, 0.2, 0.3]' --payload '{"text": "hello"}'
-        3. clawbrain retrieve --collection test --vector '[0.1, 0.2, 0.3]' --limit 1
+        2. clawbrain add --vector '[0.1, 0.2, 0.3]' --payload '{"text": "hello"}'
+        3. clawbrain search --vector '[0.1, 0.2, 0.3]' --limit 1
       render: shell
     validations:
       required: true
@@ -42,7 +42,7 @@ body:
     attributes:
       label: Expected behavior
       description: What should happen if the bug does not exist.
-      placeholder: Retrieve returns the stored memory with score ~1.0.
+      placeholder: Search returns the stored memory with score ~1.0.
     validations:
       required: true
   - type: textarea
