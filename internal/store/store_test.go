@@ -719,43 +719,42 @@ func TestFindSimilar(t *testing.T) {
 	})
 
 	t.Run("does NOT update last_accessed", func(t *testing.T) {
-		// First, get the current last_accessed via Retrieve (which does update it)
-		retrieved, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
-		if err != nil || len(retrieved) == 0 {
-			t.Fatalf("Retrieve failed: %v", err)
+		// Call FindSimilar once to capture the currently-stored last_accessed.
+		// We use FindSimilar itself (not Retrieve/Get) as the baseline so we
+		// don't trigger any side-effecting update before measuring.
+		before, err := s.FindSimilar(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
+		if err != nil {
+			t.Fatalf("FindSimilar (baseline) failed: %v", err)
 		}
-		tsAfterRetrieve, ok := retrieved[0].Payload["last_accessed"].(string)
+		if len(before) == 0 {
+			t.Fatal("expected at least 1 result from FindSimilar (baseline)")
+		}
+		tsBaseline, ok := before[0].Payload["last_accessed"].(string)
 		if !ok {
 			t.Fatal("last_accessed not a string")
 		}
 
 		time.Sleep(1100 * time.Millisecond)
 
-		// FindSimilar should NOT update last_accessed
-		_, err = s.FindSimilar(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
+		// A second FindSimilar after a sleep must return the identical
+		// last_accessed — proving FindSimilar does not mutate the stored
+		// timestamp. If it did call updateLastAccessed, the result would
+		// reflect the first call's timestamp, making tsBaseline != tsAfter.
+		after, err := s.FindSimilar(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.99, 1)
 		if err != nil {
-			t.Fatalf("FindSimilar failed: %v", err)
+			t.Fatalf("FindSimilar (after sleep) failed: %v", err)
 		}
-
-		// Get via direct lookup to check the timestamp
-		result, err := s.Get(ctx, retrieved[0].ID)
-		if err != nil {
-			t.Fatalf("Get failed: %v", err)
+		if len(after) == 0 {
+			t.Fatal("expected at least 1 result from FindSimilar (after sleep)")
 		}
-		// Note: Get itself updates last_accessed, so we need to check the
-		// timestamp was NOT already updated by FindSimilar.
-		// The Get call happens after FindSimilar + sleep, so if FindSimilar
-		// had updated it, the timestamp would be from after the sleep.
-		// Since Get is what updates it, the timestamp should be from Get's
-		// own call (which is after FindSimilar).
-		// Better approach: use a direct point fetch that doesn't update.
-		// Since we can't easily do that, let's just verify FindSimilar
-		// returns results without side effects by checking the payload
-		// in the FindSimilar result itself still has the old timestamp.
-		_ = result
-		_ = tsAfterRetrieve
-		// The key property is tested implicitly: FindSimilar doesn't call
-		// updateLastAccessed. The method implementation is the proof.
+		tsAfter, ok := after[0].Payload["last_accessed"].(string)
+		if !ok {
+			t.Fatal("last_accessed not a string in second FindSimilar result")
+		}
+		if tsAfter != tsBaseline {
+			t.Errorf("FindSimilar must not update last_accessed: baseline=%s after=%s",
+				tsBaseline, tsAfter)
+		}
 	})
 
 	t.Run("returns empty on nonexistent collection", func(t *testing.T) {
