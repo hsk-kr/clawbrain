@@ -25,6 +25,9 @@ func init() {
 	if v := os.Getenv("CLAWBRAIN_HOST"); v != "" {
 		globalHost = v
 	}
+	if v := os.Getenv("CLAWBRAIN_PORT"); v != "" {
+		fmt.Sscanf(v, "%d", &globalPort)
+	}
 	if v := os.Getenv("CLAWBRAIN_OLLAMA_URL"); v != "" {
 		globalOllamaURL = v
 	}
@@ -99,7 +102,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Global flags:")
 	fmt.Fprintln(os.Stderr, "  --host         Qdrant host (default: localhost, env: CLAWBRAIN_HOST)")
-	fmt.Fprintln(os.Stderr, "  --port         Qdrant gRPC port (default: 6334)")
+	fmt.Fprintln(os.Stderr, "  --port         Qdrant gRPC port (default: 6334, env: CLAWBRAIN_PORT)")
 	fmt.Fprintln(os.Stderr, "  --ollama-url   Ollama base URL (default: http://localhost:11434, env: CLAWBRAIN_OLLAMA_URL)")
 	fmt.Fprintln(os.Stderr, "  --model        Embedding model (default: all-minilm, env: CLAWBRAIN_MODEL)")
 	fmt.Fprintln(os.Stderr, "")
