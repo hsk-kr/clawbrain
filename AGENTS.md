@@ -185,7 +185,7 @@ Verifies that both Qdrant and Ollama are running and ClawBrain can talk to them.
 ### Sync Markdown Files
 
 ```bash
-clawbrain sync [--file PATH]... [--dir PATH]... [--base PATH]
+clawbrain sync [--file PATH]... [--dir PATH]... [--base PATH] [--exclude PATTERN]...
 ```
 
 | Flag | Required | Default | Description |
@@ -193,6 +193,7 @@ clawbrain sync [--file PATH]... [--dir PATH]... [--base PATH]
 | `--file` | no | -- | Path to a markdown file to ingest (repeatable) |
 | `--dir` | no | -- | Path to a directory of markdown files (repeatable) |
 | `--base` | no | `.` or `CLAWBRAIN_WORKSPACE` | Base path for default file discovery |
+| `--exclude` | no | -- | Glob pattern to exclude from sync (repeatable) |
 
 Reads markdown files, splits them into chunks (~1600 characters with overlap), embeds each chunk via Ollama, and stores them as memories. Tracks which files have been processed in Redis so repeated runs skip already-ingested content.
 
@@ -200,8 +201,15 @@ Reads markdown files, splits them into chunks (~1600 characters with overlap), e
 
 - **Daily files** (filenames containing `YYYY-MM-DD`, e.g. `memory/2026-02-22.md`): ingested once, permanently tracked in Redis. Never re-read.
 - **Today's daily file**: skipped entirely -- it's still being written. Tomorrow's sync will pick it up as a complete file.
-- **MEMORY.md** (case-insensitive): tracked in Redis with a 7-day TTL. After the TTL expires, the file is re-read and re-chunked. The existing dedup threshold (0.92) handles unchanged chunks automatically.
+- **MEMORY.md** (case-insensitive): tracked in Redis with a content hash. Re-synced only when the file content changes. A 7-day TTL acts as a safety net -- even if the hash check fails, the file is re-synced after a week. The dedup threshold (0.92) handles unchanged chunks automatically on re-sync.
 - **Other `.md` files**: ingested once, permanently tracked.
+
+**Excluding files:** You can exclude files from sync using `--exclude` flags or a `.clawbrain-ignore` file:
+
+- `--exclude` accepts glob patterns (repeatable): `--exclude "*.log" --exclude "scratch.md"`
+- `.clawbrain-ignore` is a file in the `--base` directory with one pattern per line (like `.gitignore` but simpler). Lines starting with `#` are comments.
+- Patterns are matched against the filename and path suffix, so both `scratch.md` and `memory/scratch.md` work as expected.
+- Patterns from both sources are combined.
 
 **Default file discovery** (when no `--file` or `--dir` flags are given): looks for `MEMORY.md` and `memory/*.md` relative to `--base`.
 

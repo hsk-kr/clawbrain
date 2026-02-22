@@ -362,8 +362,10 @@ func runSync(args []string) {
 	fs := flag.NewFlagSet("sync", flag.ExitOnError)
 	var files multiFlag
 	var dirs multiFlag
+	var excludes multiFlag
 	fs.Var(&files, "file", "Path to a markdown file to ingest (repeatable)")
 	fs.Var(&dirs, "dir", "Path to a directory of markdown files (repeatable)")
+	fs.Var(&excludes, "exclude", "Glob pattern to exclude from sync (repeatable)")
 	basePath := fs.String("base", ".", "Base path for default file discovery (env: CLAWBRAIN_WORKSPACE)")
 	fs.Parse(args)
 
@@ -396,6 +398,10 @@ func runSync(args []string) {
 		exitJSON("error", fmt.Sprintf("discover files: %v", err))
 	}
 
+	// Load ignore patterns: .clawbrain-ignore file + --exclude flags
+	ignorePatterns := sync.LoadIgnorePatterns(*basePath)
+	ignorePatterns = append(ignorePatterns, excludes...)
+
 	if len(discovered) == 0 {
 		outputJSON(map[string]any{
 			"status":  "ok",
@@ -412,6 +418,18 @@ func runSync(args []string) {
 	var results []sync.FileResult
 
 	for _, filePath := range discovered {
+		// Check ignore patterns
+		if sync.IsIgnored(filePath, ignorePatterns) {
+			fr := sync.FileResult{
+				File:    filePath,
+				Skipped: 1,
+				Reason:  "excluded by ignore pattern",
+			}
+			results = append(results, fr)
+			totalSkipped++
+			continue
+		}
+
 		// Skip today's daily file — it's still being written
 		if sync.IsTodayDailyFile(filePath) {
 			fr := sync.FileResult{
@@ -427,24 +445,26 @@ func runSync(args []string) {
 		redisKey := sync.RedisKey(filePath)
 		isMemoryMD := sync.IsMemoryMD(filePath)
 
-		// Check Redis: has this file been processed?
-		exists, err := rc.Exists(redisKey)
-		if err != nil {
-			// Non-fatal: if Redis check fails, process the file anyway
-			exists = false
-		}
-		if exists {
-			fr := sync.FileResult{
-				File:    filePath,
-				Skipped: 1,
-				Reason:  "already synced",
+		// For non-MEMORY.md files, check Redis first (cheap) before reading
+		// the file. These files are immutable — a simple existence check suffices.
+		if !isMemoryMD {
+			exists, err := rc.Exists(redisKey)
+			if err != nil {
+				exists = false
 			}
-			results = append(results, fr)
-			totalSkipped++
-			continue
+			if exists {
+				fr := sync.FileResult{
+					File:    filePath,
+					Skipped: 1,
+					Reason:  "already synced",
+				}
+				results = append(results, fr)
+				totalSkipped++
+				continue
+			}
 		}
 
-		// Read file
+		// Read file content
 		content, err := os.ReadFile(filePath)
 		if err != nil {
 			fr := sync.FileResult{
@@ -465,6 +485,23 @@ func runSync(args []string) {
 			results = append(results, fr)
 			totalSkipped++
 			continue
+		}
+
+		// For MEMORY.md: compare content hash — re-sync only if file changed.
+		var contentHash string
+		if isMemoryMD {
+			contentHash = sync.ContentHash(content)
+			storedHash, found, err := rc.Get(redisKey)
+			if err == nil && found && storedHash == contentHash {
+				fr := sync.FileResult{
+					File:    filePath,
+					Skipped: 1,
+					Reason:  "already synced (unchanged)",
+				}
+				results = append(results, fr)
+				totalSkipped++
+				continue
+			}
 		}
 
 		// Chunk the file
@@ -511,7 +548,11 @@ func runSync(args []string) {
 		// was down), leave the file unmarked so it gets retried next run.
 		if added > 0 {
 			if isMemoryMD {
-				rc.SetWithTTL(redisKey, "1", sync.MemoryMDTTLSeconds())
+				// Store the content hash so we can detect changes next run.
+				// Use a 7-day TTL as a safety net — even if the file hasn't
+				// changed, it will be re-synced after a week. This catches
+				// edge cases like hash collisions or corrupted state.
+				rc.SetWithTTL(redisKey, contentHash, sync.MemoryMDTTLSeconds())
 			} else {
 				rc.Set(redisKey, "1")
 			}

@@ -255,6 +255,143 @@ func TestDiscoverFiles_MissingFilesSilentlySkipped(t *testing.T) {
 	}
 }
 
+func TestContentHash(t *testing.T) {
+	// Deterministic: same input always gives same hash
+	h1 := ContentHash([]byte("hello world"))
+	h2 := ContentHash([]byte("hello world"))
+	if h1 != h2 {
+		t.Errorf("expected same hash for same input, got %q and %q", h1, h2)
+	}
+
+	// Different input gives different hash
+	h3 := ContentHash([]byte("goodbye world"))
+	if h1 == h3 {
+		t.Errorf("expected different hashes for different inputs")
+	}
+
+	// SHA-256 produces 64 hex characters
+	if len(h1) != 64 {
+		t.Errorf("expected 64-char hex digest, got %d chars: %q", len(h1), h1)
+	}
+
+	// Empty content still produces a valid hash
+	h4 := ContentHash([]byte(""))
+	if len(h4) != 64 {
+		t.Errorf("expected 64-char hex digest for empty input, got %d chars", len(h4))
+	}
+}
+
+func TestLoadIgnorePatterns(t *testing.T) {
+	t.Run("file exists with patterns", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "*.log\n# comment\n\nmemory/scratch.md\n  \ntemp-*\n"
+		os.WriteFile(filepath.Join(dir, ".clawbrain-ignore"), []byte(content), 0644)
+
+		patterns := LoadIgnorePatterns(dir)
+		expected := []string{"*.log", "memory/scratch.md", "temp-*"}
+		if len(patterns) != len(expected) {
+			t.Fatalf("expected %d patterns, got %d: %v", len(expected), len(patterns), patterns)
+		}
+		for i, p := range patterns {
+			if p != expected[i] {
+				t.Errorf("pattern[%d] = %q, want %q", i, p, expected[i])
+			}
+		}
+	})
+
+	t.Run("file does not exist", func(t *testing.T) {
+		dir := t.TempDir()
+		patterns := LoadIgnorePatterns(dir)
+		if patterns != nil {
+			t.Errorf("expected nil for missing file, got %v", patterns)
+		}
+	})
+
+	t.Run("file is empty", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, ".clawbrain-ignore"), []byte(""), 0644)
+		patterns := LoadIgnorePatterns(dir)
+		if len(patterns) != 0 {
+			t.Errorf("expected 0 patterns for empty file, got %d", len(patterns))
+		}
+	})
+
+	t.Run("comments and blank lines only", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, ".clawbrain-ignore"), []byte("# comment\n\n# another\n"), 0644)
+		patterns := LoadIgnorePatterns(dir)
+		if len(patterns) != 0 {
+			t.Errorf("expected 0 patterns, got %d: %v", len(patterns), patterns)
+		}
+	})
+}
+
+func TestIsIgnored(t *testing.T) {
+	tests := []struct {
+		name     string
+		filePath string
+		patterns []string
+		want     bool
+	}{
+		{
+			name:     "match base filename with wildcard",
+			filePath: "/workspace/memory/notes.log",
+			patterns: []string{"*.log"},
+			want:     true,
+		},
+		{
+			name:     "match exact base filename",
+			filePath: "/workspace/scratch.md",
+			patterns: []string{"scratch.md"},
+			want:     true,
+		},
+		{
+			name:     "no match",
+			filePath: "/workspace/memory/notes.md",
+			patterns: []string{"*.log", "scratch.md"},
+			want:     false,
+		},
+		{
+			name:     "match directory-relative pattern via suffix",
+			filePath: "/workspace/memory/scratch.md",
+			patterns: []string{"memory/scratch.md"},
+			want:     true,
+		},
+		{
+			name:     "directory pattern does not match wrong dir",
+			filePath: "/workspace/other/scratch.md",
+			patterns: []string{"memory/scratch.md"},
+			want:     false,
+		},
+		{
+			name:     "empty patterns",
+			filePath: "/workspace/notes.md",
+			patterns: nil,
+			want:     false,
+		},
+		{
+			name:     "multiple patterns first matches",
+			filePath: "/workspace/temp-file.md",
+			patterns: []string{"*.log", "temp-*"},
+			want:     true,
+		},
+		{
+			name:     "prefix pattern with wildcard",
+			filePath: "/workspace/memory/2024-01-15.md",
+			patterns: []string{"2024-*.md"},
+			want:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsIgnored(tt.filePath, tt.patterns)
+			if got != tt.want {
+				t.Errorf("IsIgnored(%q, %v) = %v, want %v", tt.filePath, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDiscoverFiles_EmptyResult(t *testing.T) {
 	dir := t.TempDir()
 	files, err := DiscoverFiles(dir, nil, nil)
