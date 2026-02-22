@@ -6,10 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hsk-coder/clawbrain/internal/ollama"
+	"github.com/hsk-coder/clawbrain/internal/redis"
 	"github.com/hsk-coder/clawbrain/internal/store"
+	"github.com/hsk-coder/clawbrain/internal/sync"
 )
 
 // Global connection settings, set by parseGlobals.
@@ -18,6 +21,8 @@ var (
 	globalPort      = 6334
 	globalOllamaURL = "http://localhost:11434"
 	globalModel     = "all-minilm"
+	globalRedisHost = "localhost"
+	globalRedisPort = 6379
 )
 
 func init() {
@@ -33,6 +38,12 @@ func init() {
 	}
 	if v := os.Getenv("CLAWBRAIN_MODEL"); v != "" {
 		globalModel = v
+	}
+	if v := os.Getenv("CLAWBRAIN_REDIS_HOST"); v != "" {
+		globalRedisHost = v
+	}
+	if v := os.Getenv("CLAWBRAIN_REDIS_PORT"); v != "" {
+		fmt.Sscanf(v, "%d", &globalRedisPort)
 	}
 }
 
@@ -57,6 +68,8 @@ func main() {
 		runForget(args[1:])
 	case "check":
 		runCheck()
+	case "sync":
+		runSync(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", command)
 		printUsage()
@@ -90,6 +103,16 @@ func parseGlobals(args []string) []string {
 				globalModel = args[i+1]
 				i++
 			}
+		case "--redis-host":
+			if i+1 < len(args) {
+				globalRedisHost = args[i+1]
+				i++
+			}
+		case "--redis-port":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &globalRedisPort)
+				i++
+			}
 		default:
 			remaining = append(remaining, args[i])
 		}
@@ -105,12 +128,15 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --port         Qdrant gRPC port (default: 6334, env: CLAWBRAIN_PORT)")
 	fmt.Fprintln(os.Stderr, "  --ollama-url   Ollama base URL (default: http://localhost:11434, env: CLAWBRAIN_OLLAMA_URL)")
 	fmt.Fprintln(os.Stderr, "  --model        Embedding model (default: all-minilm, env: CLAWBRAIN_MODEL)")
+	fmt.Fprintln(os.Stderr, "  --redis-host   Redis host (default: localhost, env: CLAWBRAIN_REDIS_HOST)")
+	fmt.Fprintln(os.Stderr, "  --redis-port   Redis port (default: 6379, env: CLAWBRAIN_REDIS_PORT)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  add            Store a memory (--text 'your text here')")
 	fmt.Fprintln(os.Stderr, "  get            Fetch a memory by ID (--id <uuid>)")
 	fmt.Fprintln(os.Stderr, "  search         Search memories (--query 'search text')")
 	fmt.Fprintln(os.Stderr, "  forget         Remove stale memories")
+	fmt.Fprintln(os.Stderr, "  sync           Ingest markdown files into memory")
 	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant and Ollama connectivity")
 }
 
@@ -321,6 +347,191 @@ func mergedIDs(results []store.Result) []string {
 		ids[i] = r.ID
 	}
 	return ids
+}
+
+// multiFlag implements flag.Value to allow repeated flags (e.g. --file a --file b).
+type multiFlag []string
+
+func (f *multiFlag) String() string { return strings.Join(*f, ", ") }
+func (f *multiFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
+func runSync(args []string) {
+	fs := flag.NewFlagSet("sync", flag.ExitOnError)
+	var files multiFlag
+	var dirs multiFlag
+	fs.Var(&files, "file", "Path to a markdown file to ingest (repeatable)")
+	fs.Var(&dirs, "dir", "Path to a directory of markdown files (repeatable)")
+	basePath := fs.String("base", ".", "Base path for default file discovery (env: CLAWBRAIN_WORKSPACE)")
+	fs.Parse(args)
+
+	// Environment variable override for base path
+	if v := os.Getenv("CLAWBRAIN_WORKSPACE"); v != "" && *basePath == "." {
+		*basePath = v
+	}
+
+	// Connect to services. Sync is a batch operation that may process many
+	// files and chunks, so use a much longer timeout than the default 30s.
+	s, err := store.New(globalHost, globalPort)
+	if err != nil {
+		exitJSON("error", err.Error())
+	}
+	defer s.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	oc := ollama.New(globalOllamaURL)
+
+	rc, err := redis.New(globalRedisHost, globalRedisPort)
+	if err != nil {
+		exitJSON("error", fmt.Sprintf("redis: %v", err))
+	}
+	defer rc.Close()
+
+	// Discover files
+	discovered, err := sync.DiscoverFiles(*basePath, files, dirs)
+	if err != nil {
+		exitJSON("error", fmt.Sprintf("discover files: %v", err))
+	}
+
+	if len(discovered) == 0 {
+		outputJSON(map[string]any{
+			"status":  "ok",
+			"files":   0,
+			"added":   0,
+			"skipped": 0,
+			"results": []any{},
+		})
+		return
+	}
+
+	totalAdded := 0
+	totalSkipped := 0
+	var results []sync.FileResult
+
+	for _, filePath := range discovered {
+		// Skip today's daily file — it's still being written
+		if sync.IsTodayDailyFile(filePath) {
+			fr := sync.FileResult{
+				File:    filePath,
+				Skipped: 1,
+				Reason:  "today's daily file, still growing",
+			}
+			results = append(results, fr)
+			totalSkipped++
+			continue
+		}
+
+		redisKey := sync.RedisKey(filePath)
+		isMemoryMD := sync.IsMemoryMD(filePath)
+
+		// Check Redis: has this file been processed?
+		exists, err := rc.Exists(redisKey)
+		if err != nil {
+			// Non-fatal: if Redis check fails, process the file anyway
+			exists = false
+		}
+		if exists {
+			fr := sync.FileResult{
+				File:    filePath,
+				Skipped: 1,
+				Reason:  "already synced",
+			}
+			results = append(results, fr)
+			totalSkipped++
+			continue
+		}
+
+		// Read file
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			fr := sync.FileResult{
+				File:   filePath,
+				Reason: fmt.Sprintf("read error: %v", err),
+			}
+			results = append(results, fr)
+			continue
+		}
+
+		text := string(content)
+		if strings.TrimSpace(text) == "" {
+			fr := sync.FileResult{
+				File:    filePath,
+				Skipped: 1,
+				Reason:  "empty file",
+			}
+			results = append(results, fr)
+			totalSkipped++
+			continue
+		}
+
+		// Chunk the file
+		chunks := sync.Chunk(text, sync.DefaultChunkSize, sync.DefaultChunkOverlap)
+		added := 0
+
+		for i, chunk := range chunks {
+			normalized := sync.NormalizeText(chunk)
+			if normalized == "" {
+				continue
+			}
+
+			// Embed via Ollama
+			vector, err := oc.Embed(ctx, globalModel, normalized)
+			if err != nil {
+				// Non-fatal per chunk: log and continue
+				continue
+			}
+
+			// Add to store with source metadata
+			payload := map[string]any{
+				"text":        normalized,
+				"source":      filePath,
+				"chunk_index": i,
+			}
+
+			// Run dedup before adding (same as regular add)
+			merged := dedupAndDelete(ctx, s, vector)
+			if len(merged) > 0 {
+				if ca := oldestCreatedAt(merged); ca != "" {
+					payload["created_at"] = ca
+				}
+			}
+
+			_, err = s.Add(ctx, "", vector, payload)
+			if err != nil {
+				continue
+			}
+			added++
+		}
+
+		// Only mark file as processed in Redis if at least one chunk
+		// was successfully stored. If all chunks failed (e.g. Ollama
+		// was down), leave the file unmarked so it gets retried next run.
+		if added > 0 {
+			if isMemoryMD {
+				rc.SetWithTTL(redisKey, "1", sync.MemoryMDTTLSeconds())
+			} else {
+				rc.Set(redisKey, "1")
+			}
+		}
+
+		fr := sync.FileResult{
+			File:  filePath,
+			Added: added,
+		}
+		results = append(results, fr)
+		totalAdded += added
+	}
+
+	outputJSON(map[string]any{
+		"status":  "ok",
+		"files":   len(discovered),
+		"added":   totalAdded,
+		"skipped": totalSkipped,
+		"results": results,
+	})
 }
 
 func runSearch(args []string) {

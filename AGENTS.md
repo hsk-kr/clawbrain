@@ -70,6 +70,8 @@ This starts:
 - **ollama-pull** -- one-time init that downloads the `all-minilm` model (~45MB)
 - **forget** -- background process that prunes stale memories
 - **clawbrain** -- CLI container for running commands (used by the OpenClaw plugin)
+- **Redis** -- tracks which files have been synced (used by sync)
+- **sync** -- background process that ingests markdown memory files
 
 Wait for `ollama-pull` to finish on first run (downloads the model). After that, startup is instant.
 
@@ -81,7 +83,7 @@ ClawBrain is actively developed. Pull the latest changes and restart the contain
 git pull && docker compose up -d --build
 ```
 
-The `--build` flag rebuilds the `forget` and `clawbrain` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
+The `--build` flag rebuilds the `forget`, `sync`, and `clawbrain` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
 
 Make this a habit. An outdated ClawBrain means missing out on better search, better decay, and better tools.
 
@@ -97,6 +99,8 @@ ClawBrain is a CLI tool. All output is JSON.
 | `--port` | `6334` | `CLAWBRAIN_PORT` | Qdrant gRPC port |
 | `--ollama-url` | `http://localhost:11434` | `CLAWBRAIN_OLLAMA_URL` | Ollama base URL |
 | `--model` | `all-minilm` | `CLAWBRAIN_MODEL` | Embedding model name |
+| `--redis-host` | `localhost` | `CLAWBRAIN_REDIS_HOST` | Redis host (used by sync) |
+| `--redis-port` | `6379` | `CLAWBRAIN_REDIS_PORT` | Redis port (used by sync) |
 
 Global flags go before the command: `clawbrain --host myserver add ...`
 
@@ -177,6 +181,50 @@ clawbrain check
 ```
 
 Verifies that both Qdrant and Ollama are running and ClawBrain can talk to them. Run this first.
+
+### Sync Markdown Files
+
+```bash
+clawbrain sync [--file PATH]... [--dir PATH]... [--base PATH]
+```
+
+| Flag | Required | Default | Description |
+|---|---|---|---|
+| `--file` | no | -- | Path to a markdown file to ingest (repeatable) |
+| `--dir` | no | -- | Path to a directory of markdown files (repeatable) |
+| `--base` | no | `.` or `CLAWBRAIN_WORKSPACE` | Base path for default file discovery |
+
+Reads markdown files, splits them into chunks (~1600 characters with overlap), embeds each chunk via Ollama, and stores them as memories. Tracks which files have been processed in Redis so repeated runs skip already-ingested content.
+
+**File handling rules:**
+
+- **Daily files** (filenames containing `YYYY-MM-DD`, e.g. `memory/2026-02-22.md`): ingested once, permanently tracked in Redis. Never re-read.
+- **Today's daily file**: skipped entirely -- it's still being written. Tomorrow's sync will pick it up as a complete file.
+- **MEMORY.md** (case-insensitive): tracked in Redis with a 7-day TTL. After the TTL expires, the file is re-read and re-chunked. The existing dedup threshold (0.92) handles unchanged chunks automatically.
+- **Other `.md` files**: ingested once, permanently tracked.
+
+**Default file discovery** (when no `--file` or `--dir` flags are given): looks for `MEMORY.md` and `memory/*.md` relative to `--base`.
+
+Each stored chunk includes source metadata in its payload:
+```json
+{
+  "text": "chunk content...",
+  "source": "/workspace/MEMORY.md",
+  "chunk_index": 0
+}
+```
+
+**Docker sidecar:** A `sync` service runs automatically alongside ClawBrain, syncing files from the `/workspace` volume every hour. Mount your agent's memory files into the workspace:
+
+```yaml
+# In docker-compose.yml, the sync service mounts:
+volumes:
+  - ./workspace:/workspace:ro
+```
+
+Place your `MEMORY.md` and `memory/` directory inside `./workspace/` and sync will pick them up automatically. The interval is configurable via `CLAWBRAIN_SYNC_INTERVAL` (seconds, default: 3600).
+
+**Requires Redis.** The sync command and sidecar depend on Redis for tracking processed files. Redis is included in the Docker Compose stack and persists data via AOF.
 
 ## How Memory Works
 

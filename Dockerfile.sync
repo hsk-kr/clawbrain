@@ -1,0 +1,12 @@
+FROM golang:1.25 AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /clawbrain ./cmd/clawbrain
+
+FROM alpine:3.21
+COPY --from=builder /clawbrain /usr/local/bin/clawbrain
+COPY sync.sh /usr/local/bin/sync.sh
+RUN chmod +x /usr/local/bin/clawbrain /usr/local/bin/sync.sh
+ENTRYPOINT ["/usr/local/bin/sync.sh"]
