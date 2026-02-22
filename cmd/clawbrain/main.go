@@ -280,9 +280,13 @@ func dedupAndDelete(ctx context.Context, s *store.Store, vector []float32) []sto
 		return nil
 	}
 
-	// Delete all old duplicates
+	// Delete all old duplicates, but never delete pinned memories.
 	var deleted []store.Result
 	for _, old := range similar {
+		if pinned, ok := old.Payload["pinned"].(bool); ok && pinned {
+			// Pinned memories are immune to automatic deletion, including dedup.
+			continue
+		}
 		if err := s.Delete(ctx, old.ID); err != nil {
 			// Non-fatal: skip this one, keep trying the rest.
 			continue
