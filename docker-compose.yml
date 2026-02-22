@@ -44,8 +44,14 @@ services:
       context: .
       dockerfile: Dockerfile.clawbrain
     depends_on:
-      - qdrant
-      - ollama
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_started
+      # Wait for the model pull to complete so that embedding commands
+      # work immediately after `docker compose up -d` on first run.
+      ollama-pull:
+        condition: service_completed_successfully
     environment:
       - CLAWBRAIN_HOST=qdrant
       - CLAWBRAIN_OLLAMA_URL=http://ollama:11434
