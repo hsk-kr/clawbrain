@@ -288,7 +288,7 @@ func main() {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search",
-		Description: "Search memories by semantic similarity. Your query is embedded and compared against stored memories. Returns ranked results with similarity scores and a confidence level (high/medium/low/none).",
+		Description: "Search memories by semantic similarity. Your query is embedded and compared against stored memories. Returns ranked results with similarity scores and a confidence level (high/medium/low/none). Call this multiple times with different or refined queries to deepen recall. If confidence is 'low' or 'none', rephrase your query or try a different angle before giving up. Increase the limit to 3-5 for broader context per search.",
 	}, handleSearch(cfg))
 
 	mcp.AddTool(server, &mcp.Tool{
