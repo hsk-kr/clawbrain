@@ -27,18 +27,6 @@ services:
       - OLLAMA_HOST=ollama
     restart: "no"
 
-  forget:
-    build:
-      context: .
-      dockerfile: Dockerfile.forget
-    depends_on:
-      - qdrant
-    environment:
-      - CLAWBRAIN_HOST=qdrant
-      - CLAWBRAIN_TTL=720h
-      - CLAWBRAIN_INTERVAL=3600
-    restart: unless-stopped
-
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
