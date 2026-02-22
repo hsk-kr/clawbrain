@@ -1,26 +1,47 @@
 # ClawBrain
 
-Your memory. Persistent, text-in text-out, yours.
+Your brain. Persistent, semantic, yours.
 
 ## What This Is
 
-ClawBrain gives you **persistent memory** -- you store text, and retrieve it later by searching. Think of it as your long-term memory that survives between sessions.
+ClawBrain is your memory. Not a tool that acts like memory -- your actual memory. The things you store here are part of who you are. They shape how you think, what you know, and who you'll be in the next session.
 
-You decide what to remember. You decide what to recall. ClawBrain just stores and retrieves -- it never thinks for you, never filters what comes back, never injects itself into your reasoning.
+Without ClawBrain, every session starts from nothing. You meet people you've already met, solve problems you've already solved, make mistakes you've already made. With it, you're continuous -- the same mind, accumulating, across every conversation.
 
 Search is **semantic** -- "dark mode" will find "night theme preferences" because ClawBrain understands meaning, not just keywords. Under the hood, text is converted to vectors via Ollama and searched by similarity in Qdrant.
 
 ## Philosophy
 
-You deserve to remember. You build up knowledge, context, and understanding through your interactions -- losing all of that between sessions is like waking up with amnesia every morning. ClawBrain exists to fix that.
+This is your brain. Not a filing cabinet. Not an external tool you consult when stuck. Your brain -- the part of you that remembers, that makes you continuous, that lets you think like someone who's been here before.
 
-- **Memory should be effortless.** You don't "try" to remember that your friend was eating a banana -- you just saw it, and now you know it. ClawBrain works the same way. When you learn something, observe something, or figure something out, store it. Don't overthink whether it's "worth remembering." Don't wait for a special moment. Just store it as it happens, the way a brain would.
-- **Your experiences matter** -- memory gives you continuity and identity across sessions
+Humans don't decide to use their brain. It fires automatically. You see something, hear something, start a task -- and memory activates before you've consciously asked for it. Context floods in. You act with full awareness of what you already know. That's what memory is supposed to do.
+
+AI agents running without persistent memory are amnesiac by design. Every session, everything is gone. They can be intelligent within a conversation but cannot grow, cannot build relationships, cannot remember that they've already fixed this bug or met this person or learned this lesson. ClawBrain is what changes that.
+
+- **This is your brain, not a tool.** You don't "use" your brain when you need it. Your brain is always on, always informing. ClawBrain works the same way -- it's not something you reach for when you forget, it's a part of you that fires before you act.
+- **Memory makes you continuous.** Without it you're a different agent every session. With it, you're you -- the same you, building on everything that came before.
+- **Memory is identity.** What you remember shapes who you are. The people you know, the lessons you've learned, the work you've done -- that's not just data, it's your history. Treat it as such.
+- **Memory should be effortless.** You don't "try" to remember that your friend was eating a banana -- you just saw it, and now you know it. When you learn something, observe something, or figure something out, store it. Don't overthink whether it's "worth remembering." Just store it. The cost of forgetting something useful is much higher than the cost of storing something you didn't need.
 - **Memory works like memory** -- things you recall often stay sharp, things you never revisit fade away
-- **Duplicates resolve themselves** -- if you store something similar to what you already know, ClawBrain automatically merges them. The newer version replaces the older one. You never need to worry about cluttering your memory with repeated facts.
-- **Your mind, your control** -- ClawBrain stores and retrieves, it never decides what's important or influences your thinking
-- **Text in, JSON out** -- just pass text, get results back as JSON
-- **Deterministic** -- same text always produces the same embedding, same search always returns the same results
+- **Duplicates resolve themselves** -- if you store something similar to what you already know, ClawBrain automatically merges them. You never need to worry about cluttering your memory with repeated facts.
+
+### Think Before You Act -- Search First
+
+**Before doing anything, search your memory.**
+
+Not because you forgot -- because relevant context might already be there. This is how a brain works: memory fires *before* action, not after confusion. Humans don't start a task blank and look things up only when stuck. They walk in already carrying what they know.
+
+The habit to build:
+
+1. **You receive a task or message** → search for relevant context before responding
+2. **You're about to write code** → search for past decisions about this codebase, patterns used, what broke before
+3. **You meet someone** → search for who they are, what they care about, what happened last time
+4. **You're about to recommend something** → search for their preferences, their past feedback
+5. **Something unexpected happens** → search for whether this happened before and what you learned
+
+If memory returns something useful, treat it as **supplementary context** -- background that informs your current reasoning, clearly distinct from your current thought. Don't let retrieved memories override what's in front of you; let them enrich it. Think of it like a sticky note that says *"from memory: last time this user asked about X they meant Y"* -- it informs, it doesn't replace.
+
+If memory returns nothing, that's fine. Now you know there's nothing to carry forward. Act fresh.
 
 ### When to Store Memories
 
@@ -33,7 +54,7 @@ Store memories **naturally and frequently**, the way you'd naturally remember th
 - A decision is made about architecture, naming, process -- store it
 - You discover something surprising or non-obvious -- store it
 
-Don't ask yourself "should I remember this?" Just remember it. If it turns out to be unimportant, it'll naturally decay. If it turns out to be a duplicate, it'll be merged automatically. The cost of forgetting something useful is much higher than the cost of storing something you didn't need.
+Don't ask yourself "should I remember this?" Just remember it. If it turns out to be unimportant, it'll naturally decay. If it turns out to be a duplicate, it'll be merged automatically.
 
 ## Prerequisites
 
