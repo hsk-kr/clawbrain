@@ -288,6 +288,8 @@ func TestCLIForget(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
+	defer cleanupMemories(t)
+
 	// Add a memory
 	out, err := runCLI(t, binary, "add",
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
@@ -661,6 +663,8 @@ func TestCLITextForget(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
+
+	defer cleanupMemories(t)
 
 	// Add a text memory
 	out, err := runCLI(t, binary, "add",
