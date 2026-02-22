@@ -230,17 +230,39 @@ The binary reads the same environment variables as the CLI:
 
 [OpenClaw](https://github.com/openclaw/openclaw) agents can use ClawBrain as native tools via a [plugin](https://docs.openclaw.ai/tools/plugin). The plugin spawns the ClawBrain MCP server as a child process and communicates over stdio using the Model Context Protocol -- the agent sees typed tools (`memory_add`, `memory_search`, `memory_get`, `memory_forget`, `memory_check`) without shelling out to a CLI.
 
+### Prerequisites
+
+- Docker running with ClawBrain services (`docker compose up -d`) -- the MCP server needs Qdrant and Ollama
+- Go toolchain (to build the MCP binary)
+- OpenClaw installed and Gateway running
+
 ### Install the Plugin
 
-**1. Build the MCP binary** (if you haven't already):
+**1. Build the MCP binary:**
 
 ```bash
 go build -o clawbrain-mcp ./cmd/mcp
 ```
 
-Make sure `clawbrain-mcp` is on your `PATH` (or note the absolute path for step 3).
+Move it somewhere on your `PATH` (or note the absolute path for step 4):
 
-**2. Install the plugin into OpenClaw:**
+```bash
+sudo mv clawbrain-mcp /usr/local/bin/
+```
+
+**2. Make sure ClawBrain's Docker services are running:**
+
+```bash
+docker compose up -d
+```
+
+Wait for `ollama-pull` to finish on first run (it downloads the embedding model). After that, verify:
+
+```bash
+clawbrain-mcp  # should start and wait for stdio input; Ctrl+C to exit
+```
+
+**3. Install the plugin into OpenClaw:**
 
 ```bash
 openclaw plugins install ./openclaw-plugin
@@ -249,7 +271,7 @@ cd ~/.openclaw/extensions/clawbrain && npm install
 
 Restart the Gateway afterwards.
 
-**3. Configure** in `~/.openclaw/openclaw.json`:
+**4. Configure** in `~/.openclaw/openclaw.json`:
 
 ```json5
 {
@@ -274,7 +296,7 @@ Restart the Gateway afterwards.
 }
 ```
 
-**4. Verify** by starting an OpenClaw session and asking: "Can you check if your memory is working?" The agent should call `memory_check` and confirm connectivity.
+**5. Verify** by starting an OpenClaw session and asking: "Can you check if your memory is working?" The agent should call `memory_check` and confirm connectivity.
 
 ### What the Agent Gets
 

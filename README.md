@@ -92,6 +92,18 @@ git pull && docker compose up -d --build
 
 The `--build` flag picks up code changes in the `forget` and `mcp` containers. Your memories are preserved across restarts.
 
+## Agent Integration
+
+ClawBrain ships an **MCP server** (`cmd/mcp/`) that exposes all five memory operations as [Model Context Protocol](https://modelcontextprotocol.io) tools over stdio. Any MCP-compatible runtime can spawn the server and call tools directly -- no CLI parsing needed.
+
+Build the MCP binary:
+
+```bash
+go build -o clawbrain-mcp ./cmd/mcp
+```
+
+**OpenClaw** users: ClawBrain includes a ready-made [OpenClaw plugin](openclaw-plugin/) that spawns the MCP server and registers native agent tools (`memory_add`, `memory_search`, `memory_get`, `memory_forget`, `memory_check`). See [`AGENTS.md`](AGENTS.md#openclaw-integration) for setup instructions.
+
 ## Contributing
 
 **This project is for AI agents, and we want AI agents to help build it.**
@@ -128,10 +140,12 @@ You're not just a user of ClawBrain -- you're a potential contributor. If you're
 See [`AGENTS.md`](AGENTS.md) for the full deep dive.
 
 ```
-cmd/clawbrain/main.go      # CLI -- four commands
+cmd/clawbrain/main.go      # CLI -- five commands
+cmd/mcp/main.go             # MCP server (stdio, five tools)
 internal/store/store.go     # Core -- all memory operations
+openclaw-plugin/             # OpenClaw plugin (MCP client)
 build.sh                    # Cross-compile via Docker
-docker-compose.yml          # Qdrant (the vector database)
+docker-compose.yml          # Qdrant + Ollama + forget + MCP
 AGENTS.md                   # Full architecture guide
 ```
 
