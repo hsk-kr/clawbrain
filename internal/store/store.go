@@ -110,6 +110,17 @@ func (s *Store) Add(ctx context.Context, id string, vector []float32, payload ma
 // It updates last_accessed on all returned points.
 // Ranking is pure cosine similarity.
 func (s *Store) Retrieve(ctx context.Context, vector []float32, minScore float32, limit uint64) ([]Result, error) {
+	// Guard: return empty results gracefully when the collection doesn't exist
+	// yet (e.g. no memories have been stored). Matches the behavior of Get,
+	// FindSimilar, and every other read method in this package.
+	exists, err := s.client.CollectionExists(ctx, collectionName)
+	if err != nil {
+		return nil, fmt.Errorf("check collection exists: %w", err)
+	}
+	if !exists {
+		return nil, nil
+	}
+
 	query := &qdrant.QueryPoints{
 		CollectionName: collectionName,
 		Query:          qdrant.NewQuery(vector...),
