@@ -228,62 +228,64 @@ The binary reads the same environment variables as the CLI:
 
 ## OpenClaw Integration
 
-[OpenClaw](https://github.com/openclaw/openclaw) uses a [skills system](https://docs.openclaw.ai/tools/skills) to teach its agent how to use tools. Skills are [AgentSkills](https://agentskills.io)-compatible folders containing a `SKILL.md` with YAML frontmatter and instructions. To give an OpenClaw agent access to ClawBrain, create a skill that wraps the CLI.
+[OpenClaw](https://github.com/openclaw/openclaw) agents can use ClawBrain as native tools via a [plugin](https://docs.openclaw.ai/tools/plugin). The plugin spawns the ClawBrain MCP server as a child process and communicates over stdio using the Model Context Protocol -- the agent sees typed tools (`memory_add`, `memory_search`, `memory_get`, `memory_forget`, `memory_check`) without shelling out to a CLI.
 
-**1. Create the skill directory:**
+### Install the Plugin
 
-Skills live in three places (highest to lowest precedence): workspace (`<workspace>/skills`), managed (`~/.openclaw/skills`), and bundled. For a workspace-level skill:
+**1. Build the MCP binary** (if you haven't already):
 
 ```bash
-mkdir -p ~/.openclaw/workspace/skills/clawbrain
+go build -o clawbrain-mcp ./cmd/mcp
 ```
 
-To share the skill across all agents on the machine, use `~/.openclaw/skills/clawbrain` instead.
+Make sure `clawbrain-mcp` is on your `PATH` (or note the absolute path for step 3).
 
-**2. Create `SKILL.md`:**
+**2. Install the plugin into OpenClaw:**
 
-```markdown
----
-name: clawbrain
-description: Persistent semantic memory. Store text, search by meaning, recall across sessions.
-metadata: {"openclaw": {"requires": {"bins": ["clawbrain"]}, "emoji": "🧠"}}
----
-
-You have persistent memory via ClawBrain. Use it to remember things across sessions.
-
-## Commands
-
-Store a memory:
-\`\`\`bash
-clawbrain add --text 'what you want to remember'
-\`\`\`
-
-Search memories (semantic -- meaning, not keywords):
-\`\`\`bash
-clawbrain search --query 'what you are looking for' --limit 5
-\`\`\`
-
-Fetch a specific memory by ID:
-\`\`\`bash
-clawbrain get --id <uuid>
-\`\`\`
-
-Check that memory is operational:
-\`\`\`bash
-clawbrain check
-\`\`\`
-
-## Guidelines
-
-- Search multiple times with different queries before concluding you don't remember something.
-- Store things worth remembering: user preferences, project context, decisions, learnings.
-- Pin critical memories with `--pinned` so they never expire.
-- Memories you never recall fade after 30 days. Recall keeps them alive.
-- All output is JSON.
+```bash
+openclaw plugins install ./openclaw-plugin
+cd ~/.openclaw/extensions/clawbrain && npm install
 ```
 
-The `metadata.openclaw.requires.bins` field gates the skill -- OpenClaw only loads it when `clawbrain` is found on `PATH`. If the binary is missing, the skill is silently skipped.
+Restart the Gateway afterwards.
 
-**3. Make sure the `clawbrain` binary is on PATH** and Docker services are running (`docker compose up -d`).
+**3. Configure** in `~/.openclaw/openclaw.json`:
 
-**4. Verify** by starting an OpenClaw session and asking: "Can you check if your memory is working?" The agent should call `clawbrain check` and confirm connectivity. Skills are snapshotted at session start, so restart the session if the skill was just created.
+```json5
+{
+  plugins: {
+    entries: {
+      clawbrain: {
+        enabled: true,
+        config: {
+          // Path to the MCP binary. Defaults to "clawbrain-mcp" on PATH.
+          // mcpBinary: "/absolute/path/to/clawbrain-mcp",
+
+          // Environment variables passed to the MCP server process.
+          // Only needed if Qdrant/Ollama are not on localhost defaults.
+          // env: {
+          //   CLAWBRAIN_HOST: "localhost",
+          //   CLAWBRAIN_OLLAMA_URL: "http://localhost:11434",
+          // },
+        },
+      },
+    },
+  },
+}
+```
+
+**4. Verify** by starting an OpenClaw session and asking: "Can you check if your memory is working?" The agent should call `memory_check` and confirm connectivity.
+
+### What the Agent Gets
+
+The plugin registers these tools -- the agent calls them directly, no CLI involved:
+
+| Tool | What it does |
+|---|---|
+| `memory_add` | Store text as a memory. Returns UUID. |
+| `memory_search` | Semantic similarity search. Returns ranked results + confidence. |
+| `memory_get` | Fetch a single memory by UUID. |
+| `memory_forget` | Prune stale memories past TTL (optional tool, opt-in). |
+| `memory_check` | Verify Qdrant + Ollama connectivity. |
+
+Under the hood, each tool call is proxied to ClawBrain's MCP server over stdio. The agent never parses CLI output or constructs bash commands -- it just calls typed functions with structured parameters and gets JSON back.

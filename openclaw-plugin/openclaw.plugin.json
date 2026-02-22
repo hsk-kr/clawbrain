@@ -1,0 +1,30 @@
+{
+  "id": "clawbrain",
+  "name": "ClawBrain",
+  "description": "Persistent semantic memory. Store text, search by meaning, recall across sessions.",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mcpBinary": {
+        "type": "string",
+        "description": "Path to the clawbrain-mcp binary. Defaults to 'clawbrain-mcp' on PATH."
+      },
+      "env": {
+        "type": "object",
+        "description": "Environment variables passed to the MCP server process.",
+        "additionalProperties": { "type": "string" }
+      }
+    }
+  },
+  "uiHints": {
+    "mcpBinary": {
+      "label": "MCP Binary Path",
+      "placeholder": "clawbrain-mcp"
+    },
+    "env": {
+      "label": "Environment Variables"
+    }
+  }
+}
