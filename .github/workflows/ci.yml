@@ -21,6 +21,11 @@ jobs:
         ports:
           - 11434:11434
 
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -61,6 +66,10 @@ jobs:
           curl -sf http://localhost:11434/api/embed -d '{"model": "all-minilm", "input": "test"}' > /dev/null \
             || { echo "Ollama embedding failed — model may not be loaded"; exit 1; }
           echo "Ollama embedding model is ready"
+
+          # Verify Redis is reachable
+          nc -z localhost 6379 || { echo "Redis not reachable on port 6379"; exit 1; }
+          echo "Redis is ready"
 
       - name: Build
         run: go build ./...

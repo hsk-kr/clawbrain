@@ -39,6 +39,13 @@ services:
       - CLAWBRAIN_INTERVAL=3600
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   clawbrain:
     build:
       context: .
@@ -55,7 +62,32 @@ services:
     environment:
       - CLAWBRAIN_HOST=qdrant
       - CLAWBRAIN_OLLAMA_URL=http://ollama:11434
+      - CLAWBRAIN_REDIS_HOST=redis
+      - CLAWBRAIN_REDIS_PORT=6379
+    restart: unless-stopped
+
+  sync:
+    build:
+      context: .
+      dockerfile: Dockerfile.sync
+    depends_on:
+      qdrant:
+        condition: service_started
+      ollama-pull:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    environment:
+      - CLAWBRAIN_HOST=qdrant
+      - CLAWBRAIN_OLLAMA_URL=http://ollama:11434
+      - CLAWBRAIN_REDIS_HOST=redis
+      - CLAWBRAIN_REDIS_PORT=6379
+      - CLAWBRAIN_WORKSPACE=/workspace
+      - CLAWBRAIN_SYNC_INTERVAL=3600
+    volumes:
+      - ./workspace:/workspace:ro
     restart: unless-stopped
 
 volumes:
   ollama_data:
+  redis_data:

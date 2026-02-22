@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -1420,6 +1421,244 @@ func TestCLIEnvPort(t *testing.T) {
 			t.Fatal("expected non-zero exit when CLAWBRAIN_PORT points to unreachable port")
 		}
 	})
+}
+
+// --- Sync command tests ---
+
+// skipIfNoRedis skips the test if Redis is not running on localhost:6379.
+func skipIfNoRedis(t *testing.T) {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", "localhost:6379", 2*time.Second)
+	if err != nil {
+		t.Skipf("Redis not available on localhost:6379, skipping: %v", err)
+	}
+	conn.Close()
+}
+
+// cleanupRedisKey deletes a key from Redis. Uses a raw TCP connection
+// to avoid importing the redis package in tests.
+func cleanupRedisKey(t *testing.T, key string) {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", "localhost:6379", 2*time.Second)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	// Send DEL command via RESP
+	cmd := fmt.Sprintf("*2\r\n$3\r\nDEL\r\n$%d\r\n%s\r\n", len(key), key)
+	conn.Write([]byte(cmd))
+}
+
+func TestCLISyncSingleFile(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	defer cleanupMemories(t)
+
+	// Create a temp markdown file
+	dir := t.TempDir()
+	filePath := dir + "/test-notes.md"
+	os.WriteFile(filePath, []byte("The project uses PostgreSQL for persistence and Redis for caching."), 0644)
+
+	// Clean Redis key for this file
+	cleanupRedisKey(t, "sync:"+filePath)
+	defer cleanupRedisKey(t, "sync:"+filePath)
+
+	out, err := runCLI(t, binary, "sync", "--file", filePath)
+	if err != nil {
+		t.Fatalf("sync failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+
+	added, _ := result["added"].(float64)
+	if added < 1 {
+		t.Fatalf("expected at least 1 chunk added, got %v", added)
+	}
+
+	// Verify the memory was actually stored by searching for it
+	searchOut, err := runCLI(t, binary, "search", "--query", "PostgreSQL database", "--limit", "1")
+	if err != nil {
+		t.Fatalf("search failed: %v\n%s", err, searchOut)
+	}
+
+	searchResult := parseJSON(t, searchOut)
+	results := searchResult["results"].([]any)
+	if len(results) == 0 {
+		t.Fatal("expected search to find the synced memory")
+	}
+
+	topPayload := results[0].(map[string]any)["payload"].(map[string]any)
+	if topPayload["source"] != filePath {
+		t.Errorf("expected source=%q, got %v", filePath, topPayload["source"])
+	}
+}
+
+func TestCLISyncSkipsDuplicates(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	defer cleanupMemories(t)
+
+	dir := t.TempDir()
+	filePath := dir + "/test-dedup.md"
+	os.WriteFile(filePath, []byte("Kubernetes pods are scheduled by the control plane."), 0644)
+
+	// Clean Redis key
+	cleanupRedisKey(t, "sync:"+filePath)
+	defer cleanupRedisKey(t, "sync:"+filePath)
+
+	// First sync — should add
+	out1, err := runCLI(t, binary, "sync", "--file", filePath)
+	if err != nil {
+		t.Fatalf("first sync failed: %v\n%s", err, out1)
+	}
+	result1 := parseJSON(t, out1)
+	added1, _ := result1["added"].(float64)
+	if added1 < 1 {
+		t.Fatalf("first sync should add chunks, got %v", added1)
+	}
+
+	// Second sync — should skip (file already in Redis)
+	out2, err := runCLI(t, binary, "sync", "--file", filePath)
+	if err != nil {
+		t.Fatalf("second sync failed: %v\n%s", err, out2)
+	}
+	result2 := parseJSON(t, out2)
+	added2, _ := result2["added"].(float64)
+	skipped2, _ := result2["skipped"].(float64)
+	if added2 != 0 {
+		t.Errorf("second sync should add 0 chunks, got %v", added2)
+	}
+	if skipped2 < 1 {
+		t.Errorf("second sync should skip the file, got skipped=%v", skipped2)
+	}
+}
+
+func TestCLISyncEmptyFile(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	dir := t.TempDir()
+	filePath := dir + "/empty.md"
+	os.WriteFile(filePath, []byte(""), 0644)
+
+	cleanupRedisKey(t, "sync:"+filePath)
+
+	out, err := runCLI(t, binary, "sync", "--file", filePath)
+	if err != nil {
+		t.Fatalf("sync failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+	added, _ := result["added"].(float64)
+	if added != 0 {
+		t.Errorf("expected 0 chunks from empty file, got %v", added)
+	}
+}
+
+func TestCLISyncDirectory(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	defer cleanupMemories(t)
+
+	dir := t.TempDir()
+	os.WriteFile(dir+"/one.md", []byte("Go is a statically typed language."), 0644)
+	os.WriteFile(dir+"/two.md", []byte("Rust provides memory safety without garbage collection."), 0644)
+
+	// Clean Redis keys
+	cleanupRedisKey(t, "sync:"+dir+"/one.md")
+	cleanupRedisKey(t, "sync:"+dir+"/two.md")
+	defer cleanupRedisKey(t, "sync:"+dir+"/one.md")
+	defer cleanupRedisKey(t, "sync:"+dir+"/two.md")
+
+	out, err := runCLI(t, binary, "sync", "--dir", dir)
+	if err != nil {
+		t.Fatalf("sync failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+
+	files, _ := result["files"].(float64)
+	if files != 2 {
+		t.Errorf("expected 2 files, got %v", files)
+	}
+
+	added, _ := result["added"].(float64)
+	if added < 2 {
+		t.Errorf("expected at least 2 chunks added, got %v", added)
+	}
+}
+
+func TestCLISyncNoFiles(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	dir := t.TempDir()
+
+	out, err := runCLI(t, binary, "sync", "--base", dir)
+	if err != nil {
+		t.Fatalf("sync failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+	files, _ := result["files"].(float64)
+	if files != 0 {
+		t.Errorf("expected 0 files, got %v", files)
+	}
+}
+
+func TestCLISyncSkipsTodayDailyFile(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	dir := t.TempDir()
+	today := time.Now().Format("2006-01-02")
+	todayFile := dir + "/" + today + ".md"
+	os.WriteFile(todayFile, []byte("Today's notes are still being written."), 0644)
+
+	out, err := runCLI(t, binary, "sync", "--file", todayFile)
+	if err != nil {
+		t.Fatalf("sync failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+	added, _ := result["added"].(float64)
+	skipped, _ := result["skipped"].(float64)
+	if added != 0 {
+		t.Errorf("expected 0 added for today's file, got %v", added)
+	}
+	if skipped < 1 {
+		t.Errorf("expected today's file to be skipped, got skipped=%v", skipped)
+	}
 }
 
 func TestMain(m *testing.M) {
