@@ -1379,6 +1379,45 @@ func TestCLICollectionsCommandRemoved(t *testing.T) {
 	}
 }
 
+// --- Env var tests ---
+
+// TestCLIEnvPort verifies that CLAWBRAIN_PORT is read from the environment.
+// exec.Command inherits the parent's env, so t.Setenv propagates to the
+// subprocess and the binary's init() picks it up before flag parsing.
+//
+// The two subtests together prove the env var is actually used:
+//   - CLAWBRAIN_PORT=6334 (valid) must succeed — proves the var is read
+//   - CLAWBRAIN_PORT=9999 (unreachable) must fail — distinguishes "env var
+//     read and used" from "env var ignored, default 6334 used accidentally"
+func TestCLIEnvPort(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	t.Run("valid port connects", func(t *testing.T) {
+		t.Setenv("CLAWBRAIN_PORT", "6334")
+		out, err := runCLI(t, binary, "check")
+		if err != nil {
+			t.Fatalf("check with CLAWBRAIN_PORT=6334 failed: %v\n%s", err, out)
+		}
+		result := parseJSON(t, out)
+		if result["status"] != "ok" {
+			t.Fatalf("expected status ok, got %v", result["status"])
+		}
+	})
+
+	t.Run("wrong port causes non-zero exit", func(t *testing.T) {
+		// If CLAWBRAIN_PORT were ignored, the binary would fall back to the
+		// default port (6334) and check would succeed. A non-zero exit here
+		// proves the env var was actually read and passed to the Qdrant client.
+		t.Setenv("CLAWBRAIN_PORT", "9999")
+		_, err := runCLI(t, binary, "check")
+		if err == nil {
+			t.Fatal("expected non-zero exit when CLAWBRAIN_PORT points to unreachable port")
+		}
+	})
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
