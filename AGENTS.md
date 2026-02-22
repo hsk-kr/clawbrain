@@ -36,6 +36,18 @@ This starts:
 
 Wait for `ollama-pull` to finish on first run (downloads the model). After that, startup is instant.
 
+## Keeping ClawBrain Up to Date
+
+ClawBrain is actively developed. Pull the latest changes and restart the containers regularly to get new features, bug fixes, and improvements:
+
+```bash
+git pull && docker compose up -d --build
+```
+
+The `--build` flag rebuilds the `forget` and `mcp` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
+
+Make this a habit. An outdated ClawBrain means missing out on better search, better decay, and better tools.
+
 ## How to Use It
 
 ClawBrain is a CLI tool. All output is JSON.
@@ -100,7 +112,9 @@ Every memory you recall gets its `last_accessed` timestamp updated -- this keeps
 
 The response includes a `returned` field -- this is the number of results actually returned, which may be less than `--limit` if fewer memories matched or cleared the `--min-score` threshold.
 
-**Important:** Search is approximate nearest neighbor (ANN), not an exhaustive scan. Even with a high `--limit` and `--min-score 0.0`, the results are the nearest neighbors to your query vector -- not all memories stored. Different queries surface different subsets.
+**Iterative recall:** Don't settle for a single search. Call search multiple times with different or refined queries to deepen your recall -- the way you'd think about something from several angles before concluding you don't know it. If the confidence in your results is `low` or `none`, rephrase your query or try a different angle before giving up. Increase the `--limit` to 3-5 for broader context per search.
+
+**Important:** Search is approximate nearest neighbor (ANN), not an exhaustive scan. Even with a high `--limit` and `--min-score 0.0`, the results are the nearest neighbors to your query vector -- not all memories stored. Different queries surface different subsets. This is another reason iterative search with varied queries is valuable -- each query can surface memories that others miss.
 
 **Advanced:** You can pass `--vector` instead of `--query` to search by pre-computed embedding vector. This bypasses Ollama.
 
@@ -158,6 +172,17 @@ How it works:
 4. The forget process runs every hour -- memories untouched past the TTL (default: 30 days) are pruned
 
 The more you recall a memory, the longer it lives. Memories you never think about again fade away on their own.
+
+### Keeping Memories Fresh
+
+Your memories are only as good as the last time you touched them. Here's how to keep your memory sharp:
+
+- **Recall keeps memories alive.** Every search or get refreshes `last_accessed`. Memories you regularly revisit will never expire. If something is important, recall it periodically.
+- **Update stale memories.** When facts change, don't leave outdated memories sitting around. Store a new memory with the corrected information. The old version will naturally decay if you stop recalling it.
+- **Pin what must never fade.** Use `--pinned` when storing memories that should persist indefinitely -- core preferences, critical context, identity-defining facts. Pinned memories are immune to TTL-based pruning.
+- **Prune deliberately.** If you know a memory is wrong or no longer relevant, don't wait for decay. You can let it expire naturally by never recalling it, or store a corrected version and let the old one fade.
+
+Think of your memory as a garden: plant what matters, water what's still relevant, and let the rest compost naturally.
 
 ## Typical Flow
 
