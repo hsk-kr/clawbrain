@@ -258,6 +258,29 @@ func TestRetrieveEmptyCollection(t *testing.T) {
 	}
 }
 
+// TestRetrieveNonexistentCollection verifies that Retrieve returns an empty
+// result (not an error) when the collection has never been created. This is
+// the common path for a fresh ClawBrain installation before any memories are
+// stored — an agent calling memory_search should get "no results" not a
+// system error.
+func TestRetrieveNonexistentCollection(t *testing.T) {
+	s := testStore(t)
+	defer s.Close()
+	cleanupMemories(t, s) // ensure the collection does not exist
+	defer cleanupMemories(t, s)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	results, err := s.Retrieve(ctx, []float32{0.1, 0.2, 0.3, 0.4}, 0.0, 10)
+	if err != nil {
+		t.Fatalf("Retrieve on nonexistent collection must not error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results when collection does not exist, got %d", len(results))
+	}
+}
+
 func TestForget(t *testing.T) {
 	s := testStore(t)
 	defer s.Close()
