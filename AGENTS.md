@@ -73,7 +73,7 @@ ClawBrain is a CLI tool. All output is JSON.
 | Flag | Default | Env Var | Description |
 |---|---|---|---|
 | `--host` | `localhost` | `CLAWBRAIN_HOST` | Qdrant host |
-| `--port` | `6334` | -- | Qdrant gRPC port |
+| `--port` | `6334` | `CLAWBRAIN_PORT` | Qdrant gRPC port |
 | `--ollama-url` | `http://localhost:11434` | `CLAWBRAIN_OLLAMA_URL` | Ollama base URL |
 | `--model` | `all-minilm` | `CLAWBRAIN_MODEL` | Embedding model name |
 
