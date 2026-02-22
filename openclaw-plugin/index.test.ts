@@ -37,10 +37,10 @@ async function run(args: string[]): Promise<Record<string, any>> {
   return parseJSON(stdout);
 }
 
-/** Cleanup: forget everything with 0s TTL (deletes all unpinned memories). */
-async function forgetAll(): Promise<void> {
+/** Cleanup: delete all unpinned memories. */
+async function deleteAll(): Promise<void> {
   try {
-    await runClawbrain(config, ["forget", "--ttl", "0s"]);
+    await runClawbrain(config, ["delete", "-d", "0"]);
   } catch {
     // Collection may not exist yet — that's fine.
   }
@@ -120,7 +120,7 @@ describe("ClawBrain plugin", () => {
 
   describe("memory_add + memory_search", () => {
     afterEach(async () => {
-      if (!skipAll) await forgetAll();
+      if (!skipAll) await deleteAll();
     });
 
     it("round-trips text through add and search", async (ctx) => {
@@ -189,7 +189,7 @@ describe("ClawBrain plugin", () => {
 
   describe("memory_get", () => {
     afterEach(async () => {
-      if (!skipAll) await forgetAll();
+      if (!skipAll) await deleteAll();
     });
 
     it("fetches a memory by ID with full payload", async (ctx) => {
@@ -227,17 +227,17 @@ describe("ClawBrain plugin", () => {
     });
   });
 
-  // --- forget ---------------------------------------------------------------
+  // --- delete ---------------------------------------------------------------
 
-  describe("memory_forget", () => {
-    it("deletes memories past TTL", async (ctx) => {
+  describe("memory_delete", () => {
+    it("deletes old memories", async (ctx) => {
       if (skipAll) { ctx.skip(); return; }
 
-      const addResult = await run(["add", "--text", "this memory will be forgotten"]);
+      const addResult = await run(["add", "--text", "this memory will be deleted"]);
       expect(addResult.status).toBe("ok");
       const memoryID = addResult.id;
 
-      const result = await run(["forget", "--ttl", "0s"]);
+      const result = await run(["delete", "-d", "0"]);
       expect(result.status).toBe("ok");
       expect(result.deleted).toBeGreaterThanOrEqual(1);
 
@@ -247,7 +247,7 @@ describe("ClawBrain plugin", () => {
       expect(getResult.status).toBe("error");
     });
 
-    it("pinned memory survives forget", async (ctx) => {
+    it("pinned memory survives delete", async (ctx) => {
       if (skipAll) { ctx.skip(); return; }
 
       // Add a pinned memory
@@ -258,11 +258,11 @@ describe("ClawBrain plugin", () => {
       const pinnedID = addPinned.id;
 
       // Add an unpinned memory
-      await run(["add", "--text", "this memory is not pinned and should be forgotten"]);
+      await run(["add", "--text", "this memory is not pinned and should be deleted"]);
 
-      // Forget with 0s TTL
-      const forgetResult = await run(["forget", "--ttl", "0s"]);
-      expect(forgetResult.deleted).toBeGreaterThanOrEqual(1);
+      // Delete with 0 days
+      const deleteResult = await run(["delete", "-d", "0"]);
+      expect(deleteResult.deleted).toBeGreaterThanOrEqual(1);
 
       // Verify pinned memory still exists
       const getResult = await run(["get", "--id", pinnedID]);
@@ -270,8 +270,8 @@ describe("ClawBrain plugin", () => {
       expect(getResult.payload.text).toBe("this memory is pinned and should survive");
       expect(getResult.payload.pinned).toBe(true);
 
-      // Cleanup: we can't forget pinned memories, so this is fine — next
-      // test's forgetAll will skip it. Tests should be tolerant of leftover
+      // Cleanup: we can't delete pinned memories, so this is fine — next
+      // test's deleteAll will skip it. Tests should be tolerant of leftover
       // pinned data.
     });
   });
@@ -280,7 +280,7 @@ describe("ClawBrain plugin", () => {
 
   describe("confidence levels", () => {
     afterEach(async () => {
-      if (!skipAll) await forgetAll();
+      if (!skipAll) await deleteAll();
     });
 
     it("returns confidence field in search results", async (ctx) => {

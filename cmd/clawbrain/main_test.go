@@ -81,9 +81,9 @@ func cleanupMemories(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Forget with 0s TTL to delete all unpinned points, then rely on
-	// the collection being reusable. For full cleanup (including dimension
-	// changes), we delete the collection entirely.
+	// Delete all unpinned points, then rely on the collection being
+	// reusable. For full cleanup (including dimension changes), we
+	// delete the collection entirely.
 	s.Forget(ctx, 0)
 	// Delete the collection if it exists — the store will recreate it on next Add.
 	s.DeleteCollection(ctx)
@@ -286,7 +286,7 @@ func TestCLISearchMissingFlags(t *testing.T) {
 	}
 }
 
-func TestCLIForget(t *testing.T) {
+func TestCLIDelete(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 
@@ -295,18 +295,18 @@ func TestCLIForget(t *testing.T) {
 	// Add a memory
 	out, err := runCLI(t, binary, "add",
 		"--vector", "[0.1, 0.2, 0.3, 0.4]",
-		"--payload", `{"text": "will be forgotten"}`,
+		"--payload", `{"text": "will be deleted"}`,
 	)
 	if err != nil {
 		t.Fatalf("add failed: %v\n%s", err, out)
 	}
 
-	// Forget with 0s TTL — should delete everything
-	out, err = runCLI(t, binary, "forget",
-		"--ttl", "0s",
+	// Delete with 0 days — should delete everything
+	out, err = runCLI(t, binary, "delete",
+		"-d", "0",
 	)
 	if err != nil {
-		t.Fatalf("forget failed: %v\n%s", err, out)
+		t.Fatalf("delete failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -330,7 +330,7 @@ func TestCLIForget(t *testing.T) {
 	searchResult := parseJSON(t, out)
 	returned, _ := searchResult["returned"].(float64)
 	if returned != 0 {
-		t.Errorf("expected 0 results after forget, got %v", returned)
+		t.Errorf("expected 0 results after delete, got %v", returned)
 	}
 }
 
@@ -384,18 +384,14 @@ func TestCLIAddSearchPreservesPayload(t *testing.T) {
 	}
 }
 
-func TestCLIForgetInvalidTTL(t *testing.T) {
+func TestCLIDeleteInvalidDays(t *testing.T) {
 	binary := buildBinary(t)
 
-	out, err := runCLI(t, binary, "forget",
-		"--ttl", "not-a-duration",
+	_, err := runCLI(t, binary, "delete",
+		"-d", "not-a-number",
 	)
 	if err == nil {
-		t.Fatal("expected error for invalid TTL format")
-	}
-	result := parseJSON(t, out)
-	if result["status"] != "error" {
-		t.Errorf("expected status error, got %v", result["status"])
+		t.Fatal("expected error for invalid -d value")
 	}
 }
 
@@ -661,7 +657,7 @@ func TestCLITextSearchMissingQuery(t *testing.T) {
 	}
 }
 
-func TestCLITextForget(t *testing.T) {
+func TestCLITextDelete(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
@@ -670,18 +666,18 @@ func TestCLITextForget(t *testing.T) {
 
 	// Add a text memory
 	out, err := runCLI(t, binary, "add",
-		"--text", "this memory will be forgotten",
+		"--text", "this memory will be deleted",
 	)
 	if err != nil {
 		t.Fatalf("add failed: %v\n%s", err, out)
 	}
 
-	// Forget with 0s TTL — should delete everything
-	out, err = runCLI(t, binary, "forget",
-		"--ttl", "0s",
+	// Delete with 0 days — should delete everything
+	out, err = runCLI(t, binary, "delete",
+		"-d", "0",
 	)
 	if err != nil {
-		t.Fatalf("forget failed: %v\n%s", err, out)
+		t.Fatalf("delete failed: %v\n%s", err, out)
 	}
 
 	result := parseJSON(t, out)
@@ -695,7 +691,7 @@ func TestCLITextForget(t *testing.T) {
 
 	// Verify search returns nothing
 	out, err = runCLI(t, binary, "search",
-		"--query", "forgotten",
+		"--query", "deleted",
 		"--limit", "10",
 	)
 	if err != nil {
@@ -705,7 +701,7 @@ func TestCLITextForget(t *testing.T) {
 	searchResult := parseJSON(t, out)
 	returned, _ := searchResult["returned"].(float64)
 	if returned != 0 {
-		t.Errorf("expected 0 results after forget, got %v", returned)
+		t.Errorf("expected 0 results after delete, got %v", returned)
 	}
 }
 
@@ -981,7 +977,7 @@ func TestCLIConfidenceWithTextQuery(t *testing.T) {
 	}
 }
 
-func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
+func TestCLIPinnedMemorySurvivesDelete(t *testing.T) {
 	binary := buildBinary(t)
 	skipIfNoQdrant(t, binary)
 	skipIfNoOllama(t)
@@ -1005,22 +1001,22 @@ func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
 
 	// Add an unpinned memory
 	out, err = runCLI(t, binary, "add",
-		"--text", "this memory is not pinned and should be forgotten",
+		"--text", "this memory is not pinned and should be deleted",
 	)
 	if err != nil {
 		t.Fatalf("add unpinned failed: %v\n%s", err, out)
 	}
 
-	// Forget with 0s TTL — should delete only the unpinned one
-	out, err = runCLI(t, binary, "forget",
-		"--ttl", "0s",
+	// Delete with 0 days — should delete only the unpinned one
+	out, err = runCLI(t, binary, "delete",
+		"-d", "0",
 	)
 	if err != nil {
-		t.Fatalf("forget failed: %v\n%s", err, out)
+		t.Fatalf("delete failed: %v\n%s", err, out)
 	}
 
-	forgetResult := parseJSON(t, out)
-	deleted, _ := forgetResult["deleted"].(float64)
+	deleteResult := parseJSON(t, out)
+	deleted, _ := deleteResult["deleted"].(float64)
 	if deleted != 1 {
 		t.Fatalf("expected 1 deletion (unpinned only), got %v", deleted)
 	}

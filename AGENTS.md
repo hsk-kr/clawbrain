@@ -68,7 +68,6 @@ This starts:
 - **Qdrant** -- vector database for storing and searching memories
 - **Ollama** -- local embedding model for converting text to vectors
 - **ollama-pull** -- one-time init that downloads the `all-minilm` model (~45MB)
-- **forget** -- background process that prunes stale memories
 - **clawbrain** -- CLI container for running commands (used by the OpenClaw plugin)
 - **Redis** -- tracks which files have been synced (used by sync)
 - **sync** -- background process that ingests markdown memory files
@@ -83,7 +82,7 @@ ClawBrain is actively developed. Pull the latest changes and restart the contain
 git pull && docker compose up -d --build
 ```
 
-The `--build` flag rebuilds the `forget`, `sync`, and `clawbrain` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
+The `--build` flag rebuilds the `sync` and `clawbrain` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
 
 Make this a habit. An outdated ClawBrain means missing out on better search, better decay, and better tools.
 
@@ -115,14 +114,14 @@ clawbrain add --text 'your text here'
 | `--text` | yes | The text to store as a memory |
 | `--payload` | no | Additional metadata as JSON object |
 | `--id` | no | UUID for the memory (auto-generated if omitted) |
-| `--pinned` | no | Pin this memory to prevent automatic forgetting |
+| `--pinned` | no | Pin this memory to prevent deletion |
 | `--no-merge` | no | Skip deduplication -- store without checking for similar memories |
 
 ClawBrain embeds your text via Ollama, stores the vector in Qdrant, and keeps the original text in the payload. It automatically adds `created_at` and `last_accessed` timestamps.
 
 **Automatic deduplication:** Before storing, ClawBrain searches for existing memories that are semantically very similar (score >= 0.92). If a near-duplicate is found, the old memory is deleted and replaced with the new one -- preserving the original `created_at` timestamp. This means you never need to worry about storing the same fact twice; the newer version always wins. The response includes a `merged_id` field when a merge occurred. Use `--no-merge` to bypass this and force-store regardless.
 
-Pinned memories are immune to TTL-based pruning by `forget`. Use `--pinned` for memories that should persist indefinitely regardless of how often they're accessed.
+Pinned memories are immune to `delete`. Use `--pinned` for memories that should persist indefinitely regardless of how often they're accessed.
 
 **Advanced:** You can also pass `--vector` with a JSON array to store pre-computed embedding vectors directly. When using `--vector`, the `--payload` flag carries your metadata. This bypasses Ollama entirely.
 
@@ -162,17 +161,17 @@ The response includes a `returned` field -- this is the number of results actual
 
 **Advanced:** You can pass `--vector` instead of `--query` to search by pre-computed embedding vector. This bypasses Ollama.
 
-### Forget Stale Memories
+### Delete Old Memories
 
 ```bash
-clawbrain forget [--ttl 720h]
+clawbrain delete [-d 30]
 ```
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
-| `--ttl` | no | `720h` (30 days) | Memories not accessed within this window are deleted |
+| `-d` | no | `30` | Delete memories not accessed in the last N days |
 
-Memories you never recall fade away -- just like human memory. Every time you retrieve a memory, its `last_accessed` is refreshed. Memories that go untouched past the TTL get pruned.
+Removes memories that haven't been recalled recently. Every time you retrieve a memory, its `last_accessed` is refreshed. Memories that go untouched past the threshold get deleted. Pinned memories are never deleted.
 
 ### Check Connectivity
 
@@ -256,29 +255,29 @@ Search understands **meaning**, not just keywords:
 
 This works because the embedding model (`all-minilm`) maps text to a mathematical space where similar meanings have similar coordinates. Qdrant finds the closest vectors by cosine similarity.
 
-### Decay
+### Cleanup
 
-Memories you never recall fade away -- automatically. A background process runs alongside Qdrant and prunes stale memories on a schedule. You don't need to do anything for this to work.
+Memories you never recall can be cleaned up with `clawbrain delete -d 30`. This removes memories not accessed in the last 30 days. Pinned memories are never deleted.
 
 How it works:
 
 1. You store a memory -- `last_accessed` is set to now
 2. You recall it later -- `last_accessed` is refreshed
 3. You never recall it again -- it sits untouched
-4. The forget process runs every hour -- memories untouched past the TTL (default: 30 days) are pruned
+4. You run `clawbrain delete -d 30` -- memories untouched for 30+ days are removed
 
-The more you recall a memory, the longer it lives. Memories you never think about again fade away on their own.
+The more you recall a memory, the longer it lives. Run `delete` periodically to keep your memory tidy.
 
 ### Keeping Memories Fresh
 
 Your memories are only as good as the last time you touched them. Here's how to keep your memory sharp:
 
-- **Recall keeps memories alive.** Every search or get refreshes `last_accessed`. Memories you regularly revisit will never expire. If something is important, recall it periodically.
-- **Update stale memories.** When facts change, don't leave outdated memories sitting around. Store a new memory with the corrected information. The old version will naturally decay if you stop recalling it.
-- **Pin what must never fade.** Use `--pinned` when storing memories that should persist indefinitely -- core preferences, critical context, identity-defining facts. Pinned memories are immune to TTL-based pruning.
-- **Prune deliberately.** If you know a memory is wrong or no longer relevant, don't wait for decay. You can let it expire naturally by never recalling it, or store a corrected version and let the old one fade.
+- **Recall keeps memories alive.** Every search or get refreshes `last_accessed`. Memories you regularly revisit will never be deleted. If something is important, recall it periodically.
+- **Update stale memories.** When facts change, don't leave outdated memories sitting around. Store a new memory with the corrected information. The old version will be cleaned up next time you run `delete`.
+- **Pin what must never fade.** Use `--pinned` when storing memories that should persist indefinitely -- core preferences, critical context, identity-defining facts. Pinned memories are immune to deletion.
+- **Prune deliberately.** If you know a memory is wrong or no longer relevant, run `delete` to clean up. Or store a corrected version and let the old one age out.
 
-Think of your memory as a garden: plant what matters, water what's still relevant, and let the rest compost naturally.
+Think of your memory as a garden: plant what matters, water what's still relevant, and prune what's no longer needed.
 
 ### Automatic Deduplication
 
@@ -302,7 +301,7 @@ The response includes `merged_id` when this happens, so you can see that a merge
 
 ## OpenClaw Integration
 
-[OpenClaw](https://github.com/openclaw/openclaw) agents can use ClawBrain as native tools via a [plugin](https://docs.openclaw.ai/tools/plugin). The plugin runs `clawbrain` CLI commands inside the Docker container and returns structured JSON -- the agent sees typed tools (`memory_add`, `memory_search`, `memory_get`, `memory_forget`, `memory_check`) without constructing bash commands or parsing output.
+[OpenClaw](https://github.com/openclaw/openclaw) agents can use ClawBrain as native tools via a [plugin](https://docs.openclaw.ai/tools/plugin). The plugin runs `clawbrain` CLI commands inside the Docker container and returns structured JSON -- the agent sees typed tools (`memory_add`, `memory_search`, `memory_get`, `memory_delete`, `memory_check`) without constructing bash commands or parsing output.
 
 ### Prerequisites
 
@@ -358,7 +357,7 @@ The plugin registers these tools -- the agent calls them like any built-in tool:
 | `memory_add` | Store text as a memory. Returns UUID. |
 | `memory_search` | Semantic similarity search. Returns ranked results + confidence. |
 | `memory_get` | Fetch a single memory by UUID. |
-| `memory_forget` | Prune stale memories past TTL (optional tool, opt-in). |
+| `memory_delete` | Delete old memories past N days (optional tool, opt-in). |
 | `memory_check` | Verify Qdrant + Ollama connectivity. |
 
 Under the hood, each tool call runs `docker compose exec clawbrain clawbrain <command>` inside the container. The agent never constructs bash commands or parses CLI output -- it calls typed functions with structured parameters and gets JSON back.

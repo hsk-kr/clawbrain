@@ -65,8 +65,8 @@ func main() {
 		runGet(args[1:])
 	case "search":
 		runSearch(args[1:])
-	case "forget":
-		runForget(args[1:])
+	case "delete":
+		runDelete(args[1:])
 	case "check":
 		runCheck()
 	case "sync":
@@ -136,7 +136,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  add            Store a memory (--text 'your text here')")
 	fmt.Fprintln(os.Stderr, "  get            Fetch a memory by ID (--id <uuid>)")
 	fmt.Fprintln(os.Stderr, "  search         Search memories (--query 'search text')")
-	fmt.Fprintln(os.Stderr, "  forget         Remove stale memories")
+	fmt.Fprintln(os.Stderr, "  delete         Delete old memories (-d <days>)")
 	fmt.Fprintln(os.Stderr, "  sync           Ingest markdown files into memory")
 	fmt.Fprintln(os.Stderr, "  check          Verify Qdrant and Ollama connectivity")
 }
@@ -185,7 +185,7 @@ func runAdd(args []string) {
 	payloadJSON := fs.String("payload", "", "Additional metadata as JSON object")
 	vectorJSON := fs.String("vector", "", "Embedding vector as JSON array (advanced, overrides text mode)")
 	id := fs.String("id", "", "UUID for the point (auto-generated if omitted)")
-	pinned := fs.Bool("pinned", false, "Pin this memory to prevent automatic forgetting")
+	pinned := fs.Bool("pinned", false, "Pin this memory to prevent deletion")
 	noMerge := fs.Bool("no-merge", false, "Skip deduplication — store without checking for similar memories")
 	fs.Parse(args)
 
@@ -634,15 +634,16 @@ func runSearch(args []string) {
 	}
 }
 
-func runForget(args []string) {
-	fs := flag.NewFlagSet("forget", flag.ExitOnError)
-	ttlStr := fs.String("ttl", "720h", "Duration — memories not accessed within this window are deleted")
+func runDelete(args []string) {
+	fs := flag.NewFlagSet("delete", flag.ExitOnError)
+	days := fs.Int("d", 30, "Delete memories not accessed in the last N days")
 	fs.Parse(args)
 
-	ttl, err := time.ParseDuration(*ttlStr)
-	if err != nil {
-		exitJSON("error", fmt.Sprintf("invalid TTL: %v", err))
+	if *days < 0 {
+		exitJSON("error", "days must be non-negative")
 	}
+
+	ttl := time.Duration(*days) * 24 * time.Hour
 
 	s, ctx, cancel := connect()
 	defer cancel()
@@ -656,7 +657,7 @@ func runForget(args []string) {
 	outputJSON(map[string]any{
 		"status":  "ok",
 		"deleted": deleted,
-		"ttl":     ttlStr,
+		"days":    *days,
 	})
 }
 

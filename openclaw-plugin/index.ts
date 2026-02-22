@@ -208,25 +208,26 @@ export default function register(api: any) {
     },
   });
 
-  // --- memory_forget --------------------------------------------------------
+  // --- memory_delete --------------------------------------------------------
   api.registerTool(
     {
-      name: "memory_forget",
+      name: "memory_delete",
       description:
-        "Prune stale memories. Deletes memories not accessed within the TTL window. Pinned memories are never deleted. Returns the count of deleted memories.",
+        "Delete old memories. Removes memories not accessed in the last N days. Pinned memories are never deleted. Returns the count of deleted memories.",
       parameters: Type.Object({
-        ttl: Type.Optional(
-          Type.String({
+        days: Type.Optional(
+          Type.Integer({
             description:
-              'Duration string (e.g. "720h" for 30 days). Memories not accessed within this window are deleted.',
+              "Delete memories not accessed in the last N days (default 30).",
+            minimum: 0,
           }),
         ),
       }),
-      async execute(_id: string, params: { ttl?: string }) {
+      async execute(_id: string, params: { days?: number }) {
         try {
-          const args = ["forget"];
-          if (params.ttl) {
-            args.push("--ttl", params.ttl);
+          const args = ["delete"];
+          if (params.days !== undefined) {
+            args.push("-d", String(params.days));
           }
           const stdout = await runClawbrain(config, args);
           return textResult(stdout);
