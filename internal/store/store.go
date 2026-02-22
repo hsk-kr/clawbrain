@@ -118,7 +118,10 @@ func (s *Store) Retrieve(ctx context.Context, vector []float32, minScore float32
 		return nil, fmt.Errorf("check collection exists: %w", err)
 	}
 	if !exists {
-		return nil, nil
+		// Return a non-nil empty slice (not nil) so callers always get a
+		// consistent JSON array ("results":[]) rather than null, regardless of
+		// whether the collection exists.
+		return []Result{}, nil
 	}
 
 	query := &qdrant.QueryPoints{

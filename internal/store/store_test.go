@@ -279,6 +279,12 @@ func TestRetrieveNonexistentCollection(t *testing.T) {
 	if len(results) != 0 {
 		t.Fatalf("expected 0 results when collection does not exist, got %d", len(results))
 	}
+	// Must return a non-nil empty slice, not nil. A nil slice serializes as
+	// JSON null ("results":null), which would cause TypeErrors in agent code
+	// that iterates over results. An empty slice serializes as [].
+	if results == nil {
+		t.Fatal("Retrieve must return a non-nil empty slice (not nil) when collection does not exist")
+	}
 }
 
 func TestForget(t *testing.T) {
