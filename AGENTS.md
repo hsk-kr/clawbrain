@@ -33,6 +33,7 @@ This starts:
 - **Ollama** -- local embedding model for converting text to vectors
 - **ollama-pull** -- one-time init that downloads the `all-minilm` model (~45MB)
 - **forget** -- background process that prunes stale memories
+- **clawbrain** -- CLI container for running commands (used by the OpenClaw plugin)
 
 Wait for `ollama-pull` to finish on first run (downloads the model). After that, startup is instant.
 
@@ -44,7 +45,7 @@ ClawBrain is actively developed. Pull the latest changes and restart the contain
 git pull && docker compose up -d --build
 ```
 
-The `--build` flag rebuilds the `forget` and `mcp` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
+The `--build` flag rebuilds the `forget` and `clawbrain` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
 
 Make this a habit. An outdated ClawBrain means missing out on better search, better decay, and better tools.
 

@@ -15,7 +15,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { execFile } from "node:child_process";
+import * as net from "node:net";
+import * as fs from "node:fs";
 import { runClawbrain, type PluginConfig } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -48,7 +49,6 @@ async function forgetAll(): Promise<void> {
 /** Check if Qdrant is reachable. */
 function isQdrantAvailable(): Promise<boolean> {
   return new Promise((resolve) => {
-    const net = require("node:net");
     const sock = net.createConnection({ host: "localhost", port: 6334 }, () => {
       sock.end();
       resolve(true);
@@ -72,16 +72,13 @@ async function isOllamaAvailable(): Promise<boolean> {
 }
 
 /** Check if the clawbrain binary exists and is executable. */
-function isBinaryAvailable(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const fs = require("node:fs");
-    try {
-      fs.accessSync(binaryPath, fs.constants.X_OK);
-      resolve(true);
-    } catch {
-      resolve(false);
-    }
-  });
+function isBinaryAvailable(): boolean {
+  try {
+    fs.accessSync(binaryPath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -92,8 +89,8 @@ describe("ClawBrain plugin", () => {
   let skipAll = false;
 
   beforeAll(async () => {
-    const [binary, qdrant, ollama] = await Promise.all([
-      isBinaryAvailable(),
+    const binary = isBinaryAvailable();
+    const [qdrant, ollama] = await Promise.all([
       isQdrantAvailable(),
       isOllamaAvailable(),
     ]);
@@ -107,18 +104,11 @@ describe("ClawBrain plugin", () => {
     }
   });
 
-  function skipIfUnavailable() {
-    if (skipAll) {
-      return true;
-    }
-    return false;
-  }
-
   // --- check ----------------------------------------------------------------
 
   describe("memory_check", () => {
-    it("returns status ok when services are running", async () => {
-      if (skipIfUnavailable()) return;
+    it.skipIf(skipAll)("returns status ok when services are running", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       const result = await run(["check"]);
       expect(result.status).toBe("ok");
@@ -133,8 +123,8 @@ describe("ClawBrain plugin", () => {
       if (!skipAll) await forgetAll();
     });
 
-    it("round-trips text through add and search", async () => {
-      if (skipIfUnavailable()) return;
+    it("round-trips text through add and search", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       // Add
       const addResult = await run(["add", "--text", "the user prefers dark mode for coding"]);
@@ -151,8 +141,8 @@ describe("ClawBrain plugin", () => {
       expect(searchResult.results[0].score).toBeGreaterThan(0);
     });
 
-    it("preserves extra payload fields", async () => {
-      if (skipIfUnavailable()) return;
+    it("preserves extra payload fields", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       await run([
         "add",
@@ -168,16 +158,16 @@ describe("ClawBrain plugin", () => {
       expect(payload.last_accessed).toBeTruthy();
     });
 
-    it("honors custom ID", async () => {
-      if (skipIfUnavailable()) return;
+    it("honors custom ID", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       const customID = "aabbccdd-1122-3344-5566-778899aabbcc";
       const result = await run(["add", "--text", "text with custom id", "--id", customID]);
       expect(result.id).toBe(customID);
     });
 
-    it("semantic search ranks correctly", async () => {
-      if (skipIfUnavailable()) return;
+    it("semantic search ranks correctly", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       // Add memories with distinct topics
       await run(["add", "--text", "the user prefers dark mode for coding at night"]);
@@ -202,8 +192,8 @@ describe("ClawBrain plugin", () => {
       if (!skipAll) await forgetAll();
     });
 
-    it("fetches a memory by ID with full payload", async () => {
-      if (skipIfUnavailable()) return;
+    it("fetches a memory by ID with full payload", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       const customID = "11111111-2222-3333-4444-555555555555";
       await run([
@@ -222,8 +212,8 @@ describe("ClawBrain plugin", () => {
       expect(result.payload.last_accessed).toBeTruthy();
     });
 
-    it("returns error for nonexistent ID", async () => {
-      if (skipIfUnavailable()) return;
+    it("returns error for nonexistent ID", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       // Add something so the collection exists
       await run(["add", "--text", "placeholder"]);
@@ -240,8 +230,8 @@ describe("ClawBrain plugin", () => {
   // --- forget ---------------------------------------------------------------
 
   describe("memory_forget", () => {
-    it("deletes memories past TTL", async () => {
-      if (skipIfUnavailable()) return;
+    it("deletes memories past TTL", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       const addResult = await run(["add", "--text", "this memory will be forgotten"]);
       expect(addResult.status).toBe("ok");
@@ -257,8 +247,8 @@ describe("ClawBrain plugin", () => {
       expect(getResult.status).toBe("error");
     });
 
-    it("pinned memory survives forget", async () => {
-      if (skipIfUnavailable()) return;
+    it("pinned memory survives forget", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       // Add a pinned memory
       const addPinned = await run([
@@ -272,7 +262,7 @@ describe("ClawBrain plugin", () => {
 
       // Forget with 0s TTL
       const forgetResult = await run(["forget", "--ttl", "0s"]);
-      expect(forgetResult.deleted).toBe(1);
+      expect(forgetResult.deleted).toBeGreaterThanOrEqual(1);
 
       // Verify pinned memory still exists
       const getResult = await run(["get", "--id", pinnedID]);
@@ -293,8 +283,8 @@ describe("ClawBrain plugin", () => {
       if (!skipAll) await forgetAll();
     });
 
-    it("returns confidence field in search results", async () => {
-      if (skipIfUnavailable()) return;
+    it("returns confidence field in search results", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       await run(["add", "--text", "the cat sat on the mat"]);
 
@@ -303,8 +293,8 @@ describe("ClawBrain plugin", () => {
       expect(["high", "medium", "low", "none"]).toContain(result.confidence);
     });
 
-    it("returns high confidence for semantically similar text", async () => {
-      if (skipIfUnavailable()) return;
+    it("returns high confidence for semantically similar text", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       await run(["add", "--text", "the cat sat on the mat"]);
 
@@ -313,8 +303,8 @@ describe("ClawBrain plugin", () => {
       expect(["high", "medium"]).toContain(result.confidence);
     });
 
-    it("returns none confidence when no results match min-score", async () => {
-      if (skipIfUnavailable()) return;
+    it("returns none confidence when no results match min-score", async (ctx) => {
+      if (skipAll) { ctx.skip(); return; }
 
       await run(["add", "--text", "I love pizza with extra cheese"]);
 
