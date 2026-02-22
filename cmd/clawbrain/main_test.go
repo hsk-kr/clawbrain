@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -1658,6 +1659,184 @@ func TestCLISyncSkipsTodayDailyFile(t *testing.T) {
 	}
 	if skipped < 1 {
 		t.Errorf("expected today's file to be skipped, got skipped=%v", skipped)
+	}
+}
+
+func TestCLISyncMemoryMDResyncsOnChange(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	defer cleanupMemories(t)
+
+	dir := t.TempDir()
+	memoryPath := dir + "/MEMORY.md"
+
+	// Write initial content
+	os.WriteFile(memoryPath, []byte("The preferred language is Go."), 0644)
+
+	// Clean Redis key (use absolute path since DiscoverFiles returns absolute paths)
+	absPath, _ := os.Getwd()
+	_ = absPath
+	cleanupRedisKey(t, "sync:"+memoryPath)
+	defer cleanupRedisKey(t, "sync:"+memoryPath)
+
+	// First sync — should add chunks
+	out, err := runCLI(t, binary, "sync", "--file", memoryPath)
+	if err != nil {
+		t.Fatalf("first sync failed: %v\n%s", err, out)
+	}
+	result1 := parseJSON(t, out)
+	added1, _ := result1["added"].(float64)
+	if added1 < 1 {
+		t.Fatalf("first sync should add chunks, got %v", added1)
+	}
+
+	// Second sync with same content — should skip (hash unchanged)
+	out, err = runCLI(t, binary, "sync", "--file", memoryPath)
+	if err != nil {
+		t.Fatalf("second sync failed: %v\n%s", err, out)
+	}
+	result2 := parseJSON(t, out)
+	added2, _ := result2["added"].(float64)
+	skipped2, _ := result2["skipped"].(float64)
+	if added2 != 0 {
+		t.Errorf("second sync (unchanged) should add 0, got %v", added2)
+	}
+	if skipped2 < 1 {
+		t.Errorf("second sync should skip MEMORY.md, got skipped=%v", skipped2)
+	}
+	// Check reason
+	results2 := result2["results"].([]any)
+	if len(results2) > 0 {
+		reason := results2[0].(map[string]any)["reason"]
+		if reason != "already synced (unchanged)" {
+			t.Errorf("expected reason 'already synced (unchanged)', got %v", reason)
+		}
+	}
+
+	// Update MEMORY.md content
+	os.WriteFile(memoryPath, []byte("The preferred language is Rust now."), 0644)
+
+	// Third sync — should re-sync because content hash changed
+	out, err = runCLI(t, binary, "sync", "--file", memoryPath)
+	if err != nil {
+		t.Fatalf("third sync failed: %v\n%s", err, out)
+	}
+	result3 := parseJSON(t, out)
+	added3, _ := result3["added"].(float64)
+	if added3 < 1 {
+		t.Fatalf("third sync (changed content) should add chunks, got %v", added3)
+	}
+}
+
+func TestCLISyncExcludeFlag(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	defer cleanupMemories(t)
+
+	dir := t.TempDir()
+	os.WriteFile(dir+"/keep.md", []byte("This file should be synced."), 0644)
+	os.WriteFile(dir+"/skip.md", []byte("This file should be excluded."), 0644)
+
+	cleanupRedisKey(t, "sync:"+dir+"/keep.md")
+	cleanupRedisKey(t, "sync:"+dir+"/skip.md")
+	defer cleanupRedisKey(t, "sync:"+dir+"/keep.md")
+	defer cleanupRedisKey(t, "sync:"+dir+"/skip.md")
+
+	// Sync with --exclude skip.md
+	out, err := runCLI(t, binary, "sync", "--dir", dir, "--exclude", "skip.md")
+	if err != nil {
+		t.Fatalf("sync failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+
+	// Should have processed 2 files but only added from keep.md
+	files, _ := result["files"].(float64)
+	if files != 2 {
+		t.Errorf("expected 2 discovered files, got %v", files)
+	}
+
+	added, _ := result["added"].(float64)
+	skipped, _ := result["skipped"].(float64)
+	if added < 1 {
+		t.Errorf("expected at least 1 added chunk (from keep.md), got %v", added)
+	}
+	if skipped < 1 {
+		t.Errorf("expected at least 1 skipped (excluded skip.md), got %v", skipped)
+	}
+
+	// Verify the excluded file's result reason
+	results := result["results"].([]any)
+	for _, r := range results {
+		fr := r.(map[string]any)
+		file := fr["file"].(string)
+		if filepath.Base(file) == "skip.md" {
+			reason, _ := fr["reason"].(string)
+			if reason != "excluded by ignore pattern" {
+				t.Errorf("expected reason 'excluded by ignore pattern' for skip.md, got %q", reason)
+			}
+		}
+	}
+}
+
+func TestCLISyncClawbrainIgnoreFile(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+	skipIfNoRedis(t)
+
+	defer cleanupMemories(t)
+
+	dir := t.TempDir()
+	os.WriteFile(dir+"/keep.md", []byte("This file should be synced."), 0644)
+	os.WriteFile(dir+"/ignored.md", []byte("This file should be ignored via .clawbrain-ignore."), 0644)
+	os.WriteFile(dir+"/.clawbrain-ignore", []byte("ignored.md\n"), 0644)
+
+	cleanupRedisKey(t, "sync:"+dir+"/keep.md")
+	cleanupRedisKey(t, "sync:"+dir+"/ignored.md")
+	defer cleanupRedisKey(t, "sync:"+dir+"/keep.md")
+	defer cleanupRedisKey(t, "sync:"+dir+"/ignored.md")
+
+	// Sync with --base pointing to the dir (so .clawbrain-ignore is found)
+	out, err := runCLI(t, binary, "sync", "--dir", dir, "--base", dir)
+	if err != nil {
+		t.Fatalf("sync failed: %v\n%s", err, out)
+	}
+
+	result := parseJSON(t, out)
+	if result["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", result["status"])
+	}
+
+	added, _ := result["added"].(float64)
+	skipped, _ := result["skipped"].(float64)
+	if added < 1 {
+		t.Errorf("expected at least 1 added chunk (from keep.md), got %v", added)
+	}
+	if skipped < 1 {
+		t.Errorf("expected at least 1 skipped (ignored.md), got %v", skipped)
+	}
+
+	// Verify ignored.md has the right reason
+	results := result["results"].([]any)
+	for _, r := range results {
+		fr := r.(map[string]any)
+		file := fr["file"].(string)
+		if filepath.Base(file) == "ignored.md" {
+			reason, _ := fr["reason"].(string)
+			if reason != "excluded by ignore pattern" {
+				t.Errorf("expected reason 'excluded by ignore pattern' for ignored.md, got %q", reason)
+			}
+		}
 	}
 }
 

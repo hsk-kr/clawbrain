@@ -4,6 +4,7 @@
 package sync
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,13 @@ const redisKeyPrefix = "sync:"
 
 // memoryMDTTL is the TTL for MEMORY.md entries in Redis (7 days).
 const memoryMDTTL = 7 * 24 * 60 * 60 // 604800 seconds
+
+// ContentHash returns the SHA-256 hex digest of the given content.
+// Used to detect whether a file has changed since last sync.
+func ContentHash(content []byte) string {
+	h := sha256.Sum256(content)
+	return fmt.Sprintf("%x", h)
+}
 
 // datePattern matches filenames containing YYYY-MM-DD.
 var datePattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
@@ -187,6 +195,55 @@ func IsTodayDailyFile(filePath string) bool {
 	}
 	today := time.Now().Format("2006-01-02")
 	return match == today
+}
+
+// LoadIgnorePatterns reads a .clawbrain-ignore file and returns the patterns.
+// Returns nil (no error) if the file does not exist.
+// Lines starting with # are comments. Empty lines are skipped.
+func LoadIgnorePatterns(basePath string) []string {
+	ignoreFile := filepath.Join(basePath, ".clawbrain-ignore")
+	data, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		return nil
+	}
+	var patterns []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+	return patterns
+}
+
+// IsIgnored checks whether a file path matches any of the ignore patterns.
+// Patterns are matched against the base filename, the full path, and —
+// for patterns containing path separators — the path suffix. This handles
+// relative patterns like "memory/scratch.md" matching absolute paths like
+// "/workspace/memory/scratch.md".
+func IsIgnored(filePath string, patterns []string) bool {
+	base := filepath.Base(filePath)
+	for _, pattern := range patterns {
+		// Match against base filename (handles "*.md", "scratch.md")
+		if matched, _ := filepath.Match(pattern, base); matched {
+			return true
+		}
+		// Match against full path (handles absolute patterns)
+		if matched, _ := filepath.Match(pattern, filePath); matched {
+			return true
+		}
+		// For patterns with path separators, try suffix matching.
+		// This allows "memory/scratch.md" to match "/workspace/memory/scratch.md".
+		if strings.Contains(pattern, string(filepath.Separator)) {
+			// Ensure we match at a path boundary by prepending separator
+			suffix := string(filepath.Separator) + pattern
+			if strings.HasSuffix(filePath, suffix) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DiscoverFiles finds markdown files to sync based on explicit paths and/or

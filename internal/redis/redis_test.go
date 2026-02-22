@@ -111,6 +111,67 @@ func TestSetWithTTL(t *testing.T) {
 	}
 }
 
+func TestGetAndSet(t *testing.T) {
+	skipIfNoRedis(t)
+	c, err := New("localhost", 6379)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	key := "clawbrain_test:get_set"
+
+	// Clean up
+	c.sendCommand("DEL", key)
+	c.readLine()
+
+	// Get non-existent key
+	val, found, err := c.Get(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("expected key to not be found before SET")
+	}
+	if val != "" {
+		t.Fatalf("expected empty value for missing key, got %q", val)
+	}
+
+	// Set it
+	if err := c.Set(key, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get should return the value
+	val, found, err = c.Get(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected key to be found after SET")
+	}
+	if val != "abc123" {
+		t.Fatalf("expected value %q, got %q", "abc123", val)
+	}
+
+	// Update value
+	if err := c.Set(key, "xyz789"); err != nil {
+		t.Fatal(err)
+	}
+
+	val, found, err = c.Get(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || val != "xyz789" {
+		t.Fatalf("expected updated value %q, got found=%v val=%q", "xyz789", found, val)
+	}
+
+	// Clean up
+	c.sendCommand("DEL", key)
+	c.readLine()
+}
+
 func TestConnectionError(t *testing.T) {
 	// Connect to a port that's definitely not Redis
 	_, err := New("localhost", 1)

@@ -6,6 +6,7 @@ package redis
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"time"
@@ -57,6 +58,37 @@ func (c *Client) SetWithTTL(key, value string, ttlSeconds int) error {
 	}
 	_, err := c.readLine()
 	return err
+}
+
+// Get retrieves the value of a key. Returns ("", false, nil) if the key
+// does not exist.
+func (c *Client) Get(key string) (string, bool, error) {
+	if err := c.sendCommand("GET", key); err != nil {
+		return "", false, err
+	}
+	line, err := c.readLine()
+	if err != nil {
+		return "", false, err
+	}
+	// RESP bulk string: "$<len>\r\n<data>\r\n" or null: "$-1\r\n"
+	if len(line) >= 2 && line[0] == '$' {
+		length, err := strconv.Atoi(line[1:])
+		if err != nil {
+			return "", false, fmt.Errorf("unexpected GET reply: %q", line)
+		}
+		if length == -1 {
+			// Key does not exist
+			return "", false, nil
+		}
+		// Read the data line
+		data := make([]byte, length+2) // +2 for trailing \r\n
+		_, err = io.ReadFull(c.rd, data)
+		if err != nil {
+			return "", false, err
+		}
+		return string(data[:length]), true, nil
+	}
+	return "", false, fmt.Errorf("unexpected GET reply: %q", line)
 }
 
 // Exists returns true if the key exists in Redis.
