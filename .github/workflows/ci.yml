@@ -75,6 +75,10 @@ jobs:
         run: npm install
         working-directory: openclaw-plugin
 
+      - name: Typecheck (Plugin)
+        run: npm run typecheck
+        working-directory: openclaw-plugin
+
       - name: Test (Plugin)
         run: CLAWBRAIN_BINARY=./clawbrain npm test
         working-directory: openclaw-plugin
