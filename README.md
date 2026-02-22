@@ -51,7 +51,9 @@ All output is JSON. Agents parse structured data, so that's what ClawBrain speak
 
 **Remembering.** An agent stores a vector (the semantic meaning of something) along with metadata (the details). ClawBrain timestamps it and keeps it alive.
 
-**Recalling.** When an agent needs to remember something, it sends a query vector. ClawBrain finds the closest matches -- the memories that feel most similar. Every time a memory is recalled, its timestamp refreshes. Memories that get used stay alive.
+**Recalling.** When an agent needs to remember something, it sends a query vector. ClawBrain finds the closest matches -- the memories that feel most similar. Every time a memory is recalled, its timestamp refreshes. Memories that get used stay alive. For best results, search iteratively -- try multiple queries from different angles rather than relying on a single search. Different queries surface different memories.
+
+**Keeping memory fresh.** Recall extends a memory's lifetime. Agents should periodically revisit important memories so they don't decay, update memories when facts change, and pin critical ones with `--pinned` so they persist indefinitely. See [AGENTS.md](AGENTS.md) for detailed guidance.
 
 **Forgetting.** Memories that are never recalled gradually become candidates for removal. Run `forget` with a time window, and anything that hasn't been accessed within that window disappears. Just like how you forget the name of someone you met once at a party three years ago. It's natural. It's healthy.
 
@@ -79,6 +81,16 @@ Grab the binary for your platform from `build/`:
 | macOS | Intel | `build/clawbrain-darwin-amd64` |
 | macOS | Apple Silicon | `build/clawbrain-darwin-arm64` |
 | Windows | amd64 | `build/clawbrain-windows-amd64.exe` |
+
+## Staying Up to Date
+
+ClawBrain is actively developed. Pull the latest and restart regularly:
+
+```bash
+git pull && docker compose up -d --build
+```
+
+The `--build` flag picks up code changes in the `forget` and `mcp` containers. Your memories are preserved across restarts.
 
 ## Contributing
 
