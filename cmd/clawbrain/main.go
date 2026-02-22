@@ -195,12 +195,12 @@ func runAdd(args []string) {
 		}
 
 		// Dedup: search for similar memories and merge if found
-		var merged *store.Result
+		var merged []store.Result
 		if !*noMerge {
 			merged = dedupAndDelete(ctx, s, vector)
 		}
-		if merged != nil {
-			if ca, ok := merged.Payload["created_at"].(string); ok {
+		if len(merged) > 0 {
+			if ca := oldestCreatedAt(merged); ca != "" {
 				payload["created_at"] = ca
 			}
 		}
@@ -214,8 +214,10 @@ func runAdd(args []string) {
 			"status": "ok",
 			"id":     pointID,
 		}
-		if merged != nil {
-			result["merged_id"] = merged.ID
+		if len(merged) > 0 {
+			result["merged_ids"] = mergedIDs(merged)
+			// Backward compat: merged_id is the first (most similar) duplicate
+			result["merged_id"] = merged[0].ID
 		}
 		outputJSON(result)
 	} else if *text != "" {
@@ -230,12 +232,12 @@ func runAdd(args []string) {
 		payload["text"] = *text
 
 		// Dedup: search for similar memories and merge if found
-		var merged *store.Result
+		var merged []store.Result
 		if !*noMerge {
 			merged = dedupAndDelete(ctx, s, vector)
 		}
-		if merged != nil {
-			if ca, ok := merged.Payload["created_at"].(string); ok {
+		if len(merged) > 0 {
+			if ca := oldestCreatedAt(merged); ca != "" {
 				payload["created_at"] = ca
 			}
 		}
@@ -249,8 +251,10 @@ func runAdd(args []string) {
 			"status": "ok",
 			"id":     pointID,
 		}
-		if merged != nil {
-			result["merged_id"] = merged.ID
+		if len(merged) > 0 {
+			result["merged_ids"] = mergedIDs(merged)
+			// Backward compat: merged_id is the first (most similar) duplicate
+			result["merged_id"] = merged[0].ID
 		}
 		outputJSON(result)
 	} else {
@@ -260,11 +264,11 @@ func runAdd(args []string) {
 	}
 }
 
-// dedupAndDelete looks for the single most similar existing memory above the
-// dedup threshold. If found, it deletes that memory and returns it so the
-// caller can preserve its created_at. Returns nil when no duplicate is found.
-func dedupAndDelete(ctx context.Context, s *store.Store, vector []float32) *store.Result {
-	similar, err := s.FindSimilar(ctx, vector, dedupThreshold, 1)
+// dedupAndDelete looks for all existing memories above the dedup threshold.
+// It deletes every duplicate found and returns the full list so the caller can
+// preserve the oldest created_at. Returns nil when no duplicates are found.
+func dedupAndDelete(ctx context.Context, s *store.Store, vector []float32) []store.Result {
+	similar, err := s.FindSimilar(ctx, vector, dedupThreshold, 64)
 	if err != nil {
 		// Non-fatal: if dedup search fails, just proceed with a normal add.
 		return nil
@@ -273,14 +277,43 @@ func dedupAndDelete(ctx context.Context, s *store.Store, vector []float32) *stor
 		return nil
 	}
 
-	// Delete the old duplicate
-	old := similar[0]
-	if err := s.Delete(ctx, old.ID); err != nil {
-		// Non-fatal: couldn't delete, proceed with normal add (may create dup).
+	// Delete all old duplicates
+	var deleted []store.Result
+	for _, old := range similar {
+		if err := s.Delete(ctx, old.ID); err != nil {
+			// Non-fatal: skip this one, keep trying the rest.
+			continue
+		}
+		deleted = append(deleted, old)
+	}
+	if len(deleted) == 0 {
 		return nil
 	}
 
-	return &old
+	return deleted
+}
+
+// oldestCreatedAt returns the earliest created_at timestamp from a set of
+// merged results. Returns "" if no valid created_at is found.
+func oldestCreatedAt(results []store.Result) string {
+	oldest := ""
+	for _, r := range results {
+		if ca, ok := r.Payload["created_at"].(string); ok {
+			if oldest == "" || ca < oldest {
+				oldest = ca
+			}
+		}
+	}
+	return oldest
+}
+
+// mergedIDs extracts the point IDs from a set of merged results.
+func mergedIDs(results []store.Result) []string {
+	ids := make([]string, len(results))
+	for i, r := range results {
+		ids[i] = r.ID
+	}
+	return ids
 }
 
 func runSearch(args []string) {

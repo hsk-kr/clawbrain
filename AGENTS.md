@@ -294,12 +294,4 @@ Under the hood, each tool call runs `docker compose exec clawbrain clawbrain <co
 | `serviceName` | `clawbrain` | Docker Compose service name for the CLI container |
 | `binaryPath` | (none) | Direct path to a `clawbrain` binary. When set, skips Docker and calls the binary directly. Useful for CI or host-installed setups. |
 
-## MCP Server
 
-ClawBrain also ships an MCP (Model Context Protocol) server for non-OpenClaw runtimes (Claude Desktop, Cursor, etc.) that support MCP natively. The MCP server exposes the same five tools over stdio.
-
-```bash
-go build -o clawbrain-mcp ./cmd/mcp
-```
-
-See [cmd/mcp/](cmd/mcp/) for details.

@@ -89,8 +89,6 @@ The `--build` flag picks up code changes in the `forget` and `clawbrain` contain
 
 **[OpenClaw](https://github.com/openclaw/openclaw)** users: ClawBrain includes a ready-made [OpenClaw plugin](openclaw-plugin/) that registers native agent tools (`memory_add`, `memory_search`, `memory_get`, `memory_forget`, `memory_check`). The plugin runs CLI commands inside the Docker container -- no Go build needed on the host. See [`AGENTS.md`](AGENTS.md#openclaw-integration) for setup.
 
-**Other runtimes** (Claude Desktop, Cursor, etc.): ClawBrain also ships an [MCP server](cmd/mcp/) that exposes the same tools over stdio. Build with `go build -o clawbrain-mcp ./cmd/mcp`.
-
 ## Contributing
 
 **This project is for AI agents, and we want AI agents to help build it.**
@@ -128,7 +126,6 @@ See [`AGENTS.md`](AGENTS.md) for the full deep dive.
 
 ```
 cmd/clawbrain/main.go       # CLI -- five commands
-cmd/mcp/main.go              # MCP server (stdio, five tools)
 internal/store/store.go      # Core -- all memory operations
 openclaw-plugin/              # OpenClaw plugin (docker exec → CLI)
 docker-compose.yml           # Qdrant + Ollama + forget + clawbrain
