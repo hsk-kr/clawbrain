@@ -48,6 +48,7 @@ type AddInput struct {
 	Payload map[string]any `json:"payload,omitempty" jsonschema:"Additional metadata as a JSON object"`
 	ID      string         `json:"id,omitempty" jsonschema:"UUID for the memory (auto-generated if omitted)"`
 	Pinned  bool           `json:"pinned,omitempty" jsonschema:"Pin this memory to prevent automatic forgetting"`
+	NoMerge bool           `json:"no_merge,omitempty" jsonschema:"Skip deduplication - store without checking for similar memories"`
 }
 
 type GetInput struct {
@@ -106,6 +107,10 @@ func confidence(results []store.Result) string {
 
 // --- Tool handlers ---
 
+// dedupThreshold is the minimum similarity score at which an existing memory
+// is considered a duplicate of the incoming text.
+const dedupThreshold float32 = 0.92
+
 func handleAdd(cfg Config) func(context.Context, *mcp.CallToolRequest, AddInput) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, input AddInput) (*mcp.CallToolResult, any, error) {
 		if input.Text == "" {
@@ -133,15 +138,34 @@ func handleAdd(cfg Config) func(context.Context, *mcp.CallToolRequest, AddInput)
 			payload["pinned"] = true
 		}
 
+		// Dedup: search for similar memories and merge if found
+		var merged *store.Result
+		if !input.NoMerge {
+			similar, findErr := s.FindSimilar(ctx, vector, dedupThreshold, 1)
+			if findErr == nil && len(similar) > 0 {
+				old := similar[0]
+				if delErr := s.Delete(ctx, old.ID); delErr == nil {
+					merged = &old
+					if ca, ok := old.Payload["created_at"].(string); ok {
+						payload["created_at"] = ca
+					}
+				}
+			}
+		}
+
 		pointID, err := s.Add(ctx, input.ID, vector, payload)
 		if err != nil {
 			return errResult(fmt.Sprintf("store failed: %v", err))
 		}
 
-		return jsonResult(map[string]any{
+		result := map[string]any{
 			"status": "ok",
 			"id":     pointID,
-		})
+		}
+		if merged != nil {
+			result["merged_id"] = merged.ID
+		}
+		return jsonResult(result)
 	}
 }
 

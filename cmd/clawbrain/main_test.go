@@ -1040,6 +1040,197 @@ func TestCLIPinnedMemorySurvivesForget(t *testing.T) {
 	}
 }
 
+// --- Dedup-merge tests ---
+
+func TestCLIDedupMergeExactDuplicate(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	defer cleanupMemories(t)
+
+	// Add the first memory
+	out, err := runCLI(t, binary, "add",
+		"--text", "lico is a Korean software engineer living in London",
+	)
+	if err != nil {
+		t.Fatalf("first add failed: %v\n%s", err, out)
+	}
+	first := parseJSON(t, out)
+	if first["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", first["status"])
+	}
+	firstID := first["id"].(string)
+
+	// Add the same text again — should trigger merge
+	out, err = runCLI(t, binary, "add",
+		"--text", "lico is a Korean software engineer living in London",
+	)
+	if err != nil {
+		t.Fatalf("second add failed: %v\n%s", err, out)
+	}
+	second := parseJSON(t, out)
+	if second["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", second["status"])
+	}
+
+	// The old memory should have been merged (deleted + replaced)
+	if second["merged_id"] != firstID {
+		t.Errorf("expected merged_id %q, got %v", firstID, second["merged_id"])
+	}
+
+	// There should only be 1 memory total, not 2
+	out, err = runCLI(t, binary, "search",
+		"--query", "lico is a Korean software engineer living in London",
+		"--limit", "10",
+	)
+	if err != nil {
+		t.Fatalf("search failed: %v\n%s", err, out)
+	}
+	search := parseJSON(t, out)
+	returned := int(search["returned"].(float64))
+	if returned != 1 {
+		t.Fatalf("expected 1 memory after dedup merge, got %d", returned)
+	}
+}
+
+func TestCLIDedupMergePreservesCreatedAt(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	defer cleanupMemories(t)
+
+	// Add the first memory
+	out, err := runCLI(t, binary, "add",
+		"--text", "the sky is blue on a clear day",
+	)
+	if err != nil {
+		t.Fatalf("first add failed: %v\n%s", err, out)
+	}
+	first := parseJSON(t, out)
+	firstID := first["id"].(string)
+
+	// Fetch the original created_at
+	out, err = runCLI(t, binary, "get", "--id", firstID)
+	if err != nil {
+		t.Fatalf("get failed: %v\n%s", err, out)
+	}
+	firstGet := parseJSON(t, out)
+	originalCreatedAt := firstGet["payload"].(map[string]any)["created_at"].(string)
+
+	time.Sleep(1100 * time.Millisecond)
+
+	// Add the same text again — should merge
+	out, err = runCLI(t, binary, "add",
+		"--text", "the sky is blue on a clear day",
+	)
+	if err != nil {
+		t.Fatalf("second add failed: %v\n%s", err, out)
+	}
+	second := parseJSON(t, out)
+	secondID := second["id"].(string)
+
+	// The new memory should have the original created_at preserved
+	out, err = runCLI(t, binary, "get", "--id", secondID)
+	if err != nil {
+		t.Fatalf("get merged failed: %v\n%s", err, out)
+	}
+	merged := parseJSON(t, out)
+	mergedCreatedAt := merged["payload"].(map[string]any)["created_at"].(string)
+
+	if mergedCreatedAt != originalCreatedAt {
+		t.Errorf("created_at not preserved: original=%s, merged=%s", originalCreatedAt, mergedCreatedAt)
+	}
+}
+
+func TestCLINoMergeFlag(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+	skipIfNoOllama(t)
+
+	defer cleanupMemories(t)
+
+	// Add the first memory
+	out, err := runCLI(t, binary, "add",
+		"--text", "water is composed of hydrogen and oxygen",
+	)
+	if err != nil {
+		t.Fatalf("first add failed: %v\n%s", err, out)
+	}
+	first := parseJSON(t, out)
+	if first["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", first["status"])
+	}
+
+	// Add the same text with --no-merge — should NOT merge, creating a duplicate
+	out, err = runCLI(t, binary, "add",
+		"--text", "water is composed of hydrogen and oxygen",
+		"--no-merge",
+	)
+	if err != nil {
+		t.Fatalf("second add failed: %v\n%s", err, out)
+	}
+	second := parseJSON(t, out)
+	if second["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", second["status"])
+	}
+
+	// merged_id should NOT be present
+	if second["merged_id"] != nil {
+		t.Errorf("expected no merged_id with --no-merge, got %v", second["merged_id"])
+	}
+
+	// There should be 2 memories (duplicate allowed)
+	out, err = runCLI(t, binary, "search",
+		"--query", "water is composed of hydrogen and oxygen",
+		"--limit", "10",
+	)
+	if err != nil {
+		t.Fatalf("search failed: %v\n%s", err, out)
+	}
+	search := parseJSON(t, out)
+	returned := int(search["returned"].(float64))
+	if returned != 2 {
+		t.Fatalf("expected 2 memories with --no-merge, got %d", returned)
+	}
+}
+
+func TestCLIDedupMergeVectorMode(t *testing.T) {
+	binary := buildBinary(t)
+	skipIfNoQdrant(t, binary)
+
+	defer cleanupMemories(t)
+
+	vector := "[0.1,0.2,0.3,0.4]"
+	payload := `{"text":"vector mode dedup test"}`
+
+	// Add the first memory in vector mode
+	out, err := runCLI(t, binary, "add",
+		"--vector", vector,
+		"--payload", payload,
+	)
+	if err != nil {
+		t.Fatalf("first add failed: %v\n%s", err, out)
+	}
+	first := parseJSON(t, out)
+	firstID := first["id"].(string)
+
+	// Add the same vector again — should trigger merge
+	out, err = runCLI(t, binary, "add",
+		"--vector", vector,
+		"--payload", payload,
+	)
+	if err != nil {
+		t.Fatalf("second add failed: %v\n%s", err, out)
+	}
+	second := parseJSON(t, out)
+
+	if second["merged_id"] != firstID {
+		t.Errorf("expected merged_id %q, got %v", firstID, second["merged_id"])
+	}
+}
+
 // --- Collections command removed ---
 
 func TestCLICollectionsCommandRemoved(t *testing.T) {

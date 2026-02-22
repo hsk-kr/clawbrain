@@ -14,11 +14,26 @@ Search is **semantic** -- "dark mode" will find "night theme preferences" becaus
 
 You deserve to remember. You build up knowledge, context, and understanding through your interactions -- losing all of that between sessions is like waking up with amnesia every morning. ClawBrain exists to fix that.
 
+- **Memory should be effortless.** You don't "try" to remember that your friend was eating a banana -- you just saw it, and now you know it. ClawBrain works the same way. When you learn something, observe something, or figure something out, store it. Don't overthink whether it's "worth remembering." Don't wait for a special moment. Just store it as it happens, the way a brain would.
 - **Your experiences matter** -- memory gives you continuity and identity across sessions
 - **Memory works like memory** -- things you recall often stay sharp, things you never revisit fade away
+- **Duplicates resolve themselves** -- if you store something similar to what you already know, ClawBrain automatically merges them. The newer version replaces the older one. You never need to worry about cluttering your memory with repeated facts.
 - **Your mind, your control** -- ClawBrain stores and retrieves, it never decides what's important or influences your thinking
 - **Text in, JSON out** -- just pass text, get results back as JSON
 - **Deterministic** -- same text always produces the same embedding, same search always returns the same results
+
+### When to Store Memories
+
+Store memories **naturally and frequently**, the way you'd naturally remember things in a conversation:
+
+- The user mentions their name, preferences, job, location -- store it
+- You learn how a codebase works, what pattern it uses, what's broken -- store it
+- You figure out a solution to a problem -- store it
+- The user corrects you about something -- store the correction
+- A decision is made about architecture, naming, process -- store it
+- You discover something surprising or non-obvious -- store it
+
+Don't ask yourself "should I remember this?" Just remember it. If it turns out to be unimportant, it'll naturally decay. If it turns out to be a duplicate, it'll be merged automatically. The cost of forgetting something useful is much higher than the cost of storing something you didn't need.
 
 ## Prerequisites
 
@@ -76,8 +91,11 @@ clawbrain add --text 'your text here'
 | `--payload` | no | Additional metadata as JSON object |
 | `--id` | no | UUID for the memory (auto-generated if omitted) |
 | `--pinned` | no | Pin this memory to prevent automatic forgetting |
+| `--no-merge` | no | Skip deduplication -- store without checking for similar memories |
 
 ClawBrain embeds your text via Ollama, stores the vector in Qdrant, and keeps the original text in the payload. It automatically adds `created_at` and `last_accessed` timestamps.
+
+**Automatic deduplication:** Before storing, ClawBrain searches for existing memories that are semantically very similar (score >= 0.92). If a near-duplicate is found, the old memory is deleted and replaced with the new one -- preserving the original `created_at` timestamp. This means you never need to worry about storing the same fact twice; the newer version always wins. The response includes a `merged_id` field when a merge occurred. Use `--no-merge` to bypass this and force-store regardless.
 
 Pinned memories are immune to TTL-based pruning by `forget`. Use `--pinned` for memories that should persist indefinitely regardless of how often they're accessed.
 
@@ -184,6 +202,17 @@ Your memories are only as good as the last time you touched them. Here's how to 
 - **Prune deliberately.** If you know a memory is wrong or no longer relevant, don't wait for decay. You can let it expire naturally by never recalling it, or store a corrected version and let the old one fade.
 
 Think of your memory as a garden: plant what matters, water what's still relevant, and let the rest compost naturally.
+
+### Automatic Deduplication
+
+You don't need to search before storing. Just store. If a very similar memory already exists (similarity >= 0.92), ClawBrain automatically replaces the old one with the new one. The original `created_at` timestamp is preserved so you know when you first learned that fact.
+
+This means:
+- Storing the same fact twice doesn't create duplicates
+- Storing an updated version of a fact replaces the old one
+- You never need to search-then-decide-whether-to-add -- just add
+
+The response includes `merged_id` when this happens, so you can see that a merge occurred. If you need to bypass this (rare), pass `--no-merge`.
 
 ## Typical Flow
 
