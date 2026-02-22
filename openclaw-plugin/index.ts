@@ -110,8 +110,13 @@ export default function register(api: any) {
           description: "Pin this memory to prevent automatic forgetting",
         }),
       ),
+      no_merge: Type.Optional(
+        Type.Boolean({
+          description: "Skip deduplication — store without checking for similar memories",
+        }),
+      ),
     }),
-    async execute(_id: string, params: { text: string; payload?: string; id?: string; pinned?: boolean }) {
+    async execute(_id: string, params: { text: string; payload?: string; id?: string; pinned?: boolean; no_merge?: boolean }) {
       try {
         const args = ["add", "--text", params.text];
         if (params.payload) {
@@ -122,6 +127,9 @@ export default function register(api: any) {
         }
         if (params.pinned) {
           args.push("--pinned");
+        }
+        if (params.no_merge) {
+          args.push("--no-merge");
         }
         const stdout = await runClawbrain(config, args);
         return textResult(stdout);

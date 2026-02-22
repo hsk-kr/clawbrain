@@ -142,6 +142,13 @@ func runGet(args []string) {
 	})
 }
 
+// dedupThreshold is the minimum similarity score at which an existing memory
+// is considered a duplicate of the incoming text. When a match is found at or
+// above this threshold, the old memory is deleted and its created_at is
+// preserved on the new one — effectively "merging" by letting the newer text
+// replace the older version while keeping its origin timestamp.
+const dedupThreshold float32 = 0.92
+
 func runAdd(args []string) {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	text := fs.String("text", "", "Text to store as a memory (default mode)")
@@ -149,6 +156,7 @@ func runAdd(args []string) {
 	vectorJSON := fs.String("vector", "", "Embedding vector as JSON array (advanced, overrides text mode)")
 	id := fs.String("id", "", "UUID for the point (auto-generated if omitted)")
 	pinned := fs.Bool("pinned", false, "Pin this memory to prevent automatic forgetting")
+	noMerge := fs.Bool("no-merge", false, "Skip deduplication — store without checking for similar memories")
 	fs.Parse(args)
 
 	// Parse optional payload
@@ -186,15 +194,30 @@ func runAdd(args []string) {
 			exitJSON("error", "payload must contain a non-empty \"text\" field")
 		}
 
+		// Dedup: search for similar memories and merge if found
+		var merged *store.Result
+		if !*noMerge {
+			merged = dedupAndDelete(ctx, s, vector)
+		}
+		if merged != nil {
+			if ca, ok := merged.Payload["created_at"].(string); ok {
+				payload["created_at"] = ca
+			}
+		}
+
 		pointID, err := s.Add(ctx, *id, vector, payload)
 		if err != nil {
 			exitJSON("error", err.Error())
 		}
 
-		outputJSON(map[string]any{
+		result := map[string]any{
 			"status": "ok",
 			"id":     pointID,
-		})
+		}
+		if merged != nil {
+			result["merged_id"] = merged.ID
+		}
+		outputJSON(result)
 	} else if *text != "" {
 		// Default text mode: embed via Ollama, then store
 		oc := ollama.New(globalOllamaURL)
@@ -206,20 +229,58 @@ func runAdd(args []string) {
 		// Store the original text in payload so it can be returned on retrieval
 		payload["text"] = *text
 
+		// Dedup: search for similar memories and merge if found
+		var merged *store.Result
+		if !*noMerge {
+			merged = dedupAndDelete(ctx, s, vector)
+		}
+		if merged != nil {
+			if ca, ok := merged.Payload["created_at"].(string); ok {
+				payload["created_at"] = ca
+			}
+		}
+
 		pointID, err := s.Add(ctx, *id, vector, payload)
 		if err != nil {
 			exitJSON("error", err.Error())
 		}
 
-		outputJSON(map[string]any{
+		result := map[string]any{
 			"status": "ok",
 			"id":     pointID,
-		})
+		}
+		if merged != nil {
+			result["merged_id"] = merged.ID
+		}
+		outputJSON(result)
 	} else {
 		fmt.Fprintln(os.Stderr, "Error: --text is required (or --vector for advanced mode)")
 		fs.Usage()
 		os.Exit(1)
 	}
+}
+
+// dedupAndDelete looks for the single most similar existing memory above the
+// dedup threshold. If found, it deletes that memory and returns it so the
+// caller can preserve its created_at. Returns nil when no duplicate is found.
+func dedupAndDelete(ctx context.Context, s *store.Store, vector []float32) *store.Result {
+	similar, err := s.FindSimilar(ctx, vector, dedupThreshold, 1)
+	if err != nil {
+		// Non-fatal: if dedup search fails, just proceed with a normal add.
+		return nil
+	}
+	if len(similar) == 0 {
+		return nil
+	}
+
+	// Delete the old duplicate
+	old := similar[0]
+	if err := s.Delete(ctx, old.ID); err != nil {
+		// Non-fatal: couldn't delete, proceed with normal add (may create dup).
+		return nil
+	}
+
+	return &old
 }
 
 func runSearch(args []string) {

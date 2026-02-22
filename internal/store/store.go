@@ -76,7 +76,10 @@ func (s *Store) Add(ctx context.Context, id string, vector []float32, payload ma
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	payload["created_at"] = now
+	// Only set created_at if not already present (e.g. preserved from a merged memory)
+	if _, exists := payload["created_at"]; !exists {
+		payload["created_at"] = now
+	}
 	payload["last_accessed"] = now
 
 	if id == "" {
@@ -227,6 +230,71 @@ func (s *Store) Forget(ctx context.Context, ttl time.Duration) (int, error) {
 	}
 
 	return len(pointIDs), nil
+}
+
+// Delete removes a single memory by its UUID.
+// Returns nil if the point doesn't exist or the collection doesn't exist.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	exists, err := s.client.CollectionExists(ctx, collectionName)
+	if err != nil {
+		return fmt.Errorf("check collection: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+
+	wait := true
+	_, err = s.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collectionName,
+		Wait:           &wait,
+		Points: &qdrant.PointsSelector{
+			PointsSelectorOneOf: &qdrant.PointsSelector_Points{
+				Points: &qdrant.PointsIdsList{
+					Ids: []*qdrant.PointId{qdrant.NewIDUUID(id)},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("delete point: %w", err)
+	}
+	return nil
+}
+
+// FindSimilar searches for memories similar to the given vector above a score threshold.
+// Unlike Retrieve, it does NOT update last_accessed on returned points.
+// This is intended for internal dedup checks before insertion.
+func (s *Store) FindSimilar(ctx context.Context, vector []float32, threshold float32, limit uint64) ([]Result, error) {
+	exists, err := s.client.CollectionExists(ctx, collectionName)
+	if err != nil {
+		return nil, fmt.Errorf("check collection: %w", err)
+	}
+	if !exists {
+		return nil, nil
+	}
+
+	query := &qdrant.QueryPoints{
+		CollectionName: collectionName,
+		Query:          qdrant.NewQuery(vector...),
+		WithPayload:    qdrant.NewWithPayload(true),
+		ScoreThreshold: &threshold,
+		Limit:          &limit,
+	}
+
+	results, err := s.client.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+
+	out := make([]Result, 0, len(results))
+	for _, point := range results {
+		out = append(out, Result{
+			ID:      pointIDToString(point.Id),
+			Score:   point.Score,
+			Payload: valueMapToGoMap(point.Payload),
+		})
+	}
+	return out, nil
 }
 
 // DeleteCollection deletes the memories collection entirely.
