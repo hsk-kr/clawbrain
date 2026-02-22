@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -518,6 +519,7 @@ func runSync(args []string) {
 			vector, err := oc.Embed(ctx, globalModel, normalized)
 			if err != nil {
 				// Non-fatal per chunk: log and continue
+				log.Printf("sync: embed failed for %s chunk %d: %v", filePath, i, err)
 				continue
 			}
 
@@ -538,6 +540,7 @@ func runSync(args []string) {
 
 			_, err = s.Add(ctx, "", vector, payload)
 			if err != nil {
+				log.Printf("sync: store failed for %s chunk %d: %v", filePath, i, err)
 				continue
 			}
 			added++

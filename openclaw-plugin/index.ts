@@ -20,26 +20,37 @@ function resolveConfig(api: any): PluginConfig {
   };
 }
 
+/** Default timeout for child process execution (60 seconds). */
+const EXEC_TIMEOUT_MS = 60_000;
+
 function execPromise(
   cmd: string,
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        // CLI returns JSON errors on stdout with exit code 0 in some cases,
-        // but real failures (binary not found, docker not running) come here.
-        // If we got stdout, treat it as a result anyway (the CLI writes JSON
-        // errors to stdout with exit code 1).
-        if (stdout && stdout.trim()) {
-          resolve({ stdout: stdout.trim(), stderr: stderr?.trim() ?? "" });
+    execFile(
+      cmd,
+      args,
+      { maxBuffer: 10 * 1024 * 1024, timeout: EXEC_TIMEOUT_MS },
+      (err, stdout, stderr) => {
+        if (err) {
+          // CLI returns JSON errors on stdout with exit code 0 in some cases,
+          // but real failures (binary not found, docker not running) come here.
+          // If we got stdout, treat it as a result anyway (the CLI writes JSON
+          // errors to stdout with exit code 1).
+          if (stdout && stdout.trim()) {
+            resolve({ stdout: stdout.trim(), stderr: stderr?.trim() ?? "" });
+            return;
+          }
+          // Include stderr context in the error message when available.
+          const stderrMsg = stderr?.trim();
+          const detail = stderrMsg ? `${err.message} — stderr: ${stderrMsg}` : err.message;
+          reject(new Error(detail));
           return;
         }
-        reject(new Error(stderr?.trim() || err.message));
-        return;
-      }
-      resolve({ stdout: stdout.trim(), stderr: stderr?.trim() ?? "" });
-    });
+        resolve({ stdout: stdout.trim(), stderr: stderr?.trim() ?? "" });
+      },
+    );
   });
 }
 

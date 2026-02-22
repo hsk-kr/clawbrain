@@ -1,0 +1,16 @@
+qdrant_storage/
+workspace/
+openclaw-plugin/
+.git/
+.github/
+*.md
+LICENSE
+
+# Build artifacts (matches .gitignore)
+/clawbrain
+build/
+*.test
+*.out
+*.dll
+*.so
+*.dylib
