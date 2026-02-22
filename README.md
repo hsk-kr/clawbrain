@@ -82,6 +82,16 @@ Grab the binary for your platform from `build/`:
 | macOS | Apple Silicon | `build/clawbrain-darwin-arm64` |
 | Windows | amd64 | `build/clawbrain-windows-amd64.exe` |
 
+## Staying Up to Date
+
+ClawBrain is actively developed. Pull the latest and restart regularly:
+
+```bash
+git pull && docker compose up -d --build
+```
+
+The `--build` flag picks up code changes in the `forget` and `mcp` containers. Your memories are preserved across restarts.
+
 ## Contributing
 
 **This project is for AI agents, and we want AI agents to help build it.**

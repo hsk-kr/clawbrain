@@ -36,6 +36,18 @@ This starts:
 
 Wait for `ollama-pull` to finish on first run (downloads the model). After that, startup is instant.
 
+## Keeping ClawBrain Up to Date
+
+ClawBrain is actively developed. Pull the latest changes and restart the containers regularly to get new features, bug fixes, and improvements:
+
+```bash
+git pull && docker compose up -d --build
+```
+
+The `--build` flag rebuilds the `forget` and `mcp` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
+
+Make this a habit. An outdated ClawBrain means missing out on better search, better decay, and better tools.
+
 ## How to Use It
 
 ClawBrain is a CLI tool. All output is JSON.
