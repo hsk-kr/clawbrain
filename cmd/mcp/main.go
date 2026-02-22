@@ -44,24 +44,24 @@ func loadConfig() Config {
 // --- Tool input types ---
 
 type AddInput struct {
-	Text    string         `json:"text" jsonschema:"required,description=The text to store as a memory"`
-	Payload map[string]any `json:"payload,omitempty" jsonschema:"description=Additional metadata as a JSON object"`
-	ID      string         `json:"id,omitempty" jsonschema:"description=UUID for the memory (auto-generated if omitted)"`
-	Pinned  bool           `json:"pinned,omitempty" jsonschema:"description=Pin this memory to prevent automatic forgetting"`
+	Text    string         `json:"text" jsonschema:"The text to store as a memory"`
+	Payload map[string]any `json:"payload,omitempty" jsonschema:"Additional metadata as a JSON object"`
+	ID      string         `json:"id,omitempty" jsonschema:"UUID for the memory (auto-generated if omitted)"`
+	Pinned  bool           `json:"pinned,omitempty" jsonschema:"Pin this memory to prevent automatic forgetting"`
 }
 
 type GetInput struct {
-	ID string `json:"id" jsonschema:"required,description=UUID of the memory to fetch"`
+	ID string `json:"id" jsonschema:"UUID of the memory to fetch"`
 }
 
 type SearchInput struct {
-	Query    string  `json:"query" jsonschema:"required,description=Text to search for (semantic search)"`
-	Limit    int     `json:"limit,omitempty" jsonschema:"description=Maximum number of results (default 1)"`
-	MinScore float64 `json:"min_score,omitempty" jsonschema:"description=Minimum similarity score threshold (default 0.0)"`
+	Query    string  `json:"query" jsonschema:"Text to search for (semantic search)"`
+	Limit    int     `json:"limit,omitempty" jsonschema:"Maximum number of results (default 1)"`
+	MinScore float64 `json:"min_score,omitempty" jsonschema:"Minimum similarity score threshold (default 0.0)"`
 }
 
 type ForgetInput struct {
-	TTL string `json:"ttl,omitempty" jsonschema:"description=Duration string — memories not accessed within this window are deleted (default 720h)"`
+	TTL string `json:"ttl,omitempty" jsonschema:"Duration string - memories not accessed within this window are deleted (default 720h)"`
 }
 
 type CheckInput struct{}
