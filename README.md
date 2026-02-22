@@ -26,20 +26,16 @@ Five commands. That's it.
 
 ```bash
 # Store a memory
-clawbrain add --collection memories \
-  --vector '[0.1, 0.2, 0.3, 0.4]' \
-  --payload '{"text": "the user prefers dark mode"}'
+clawbrain add --text 'the user prefers dark mode'
 
 # Fetch a specific memory by ID
-clawbrain get --collection memories --id <uuid>
+clawbrain get --id <uuid>
 
 # Recall similar memories
-clawbrain search --collection memories \
-  --vector '[0.1, 0.2, 0.3, 0.4]' \
-  --min-score 0.7 --limit 5
+clawbrain search --query 'dark mode' --limit 5
 
 # Let old memories fade
-clawbrain forget --collection memories --ttl 720h
+clawbrain forget --ttl 720h
 
 # Check that everything is working
 clawbrain check
@@ -67,20 +63,17 @@ You just need Docker.
 # Start the memory engine
 docker compose up -d
 
-# Verify it's alive
-./build/clawbrain-darwin-arm64 check
-# {"status":"ok","message":"ClawBrain stack verified"}
+# Verify it's alive (via Docker)
+docker compose exec clawbrain clawbrain check
+# {"status":"ok","message":"Qdrant and Ollama verified"}
 ```
 
-Grab the binary for your platform from `build/`:
+Or build the CLI locally if you prefer:
 
-| OS | Arch | Binary |
-|---|---|---|
-| Linux | amd64 | `build/clawbrain-linux-amd64` |
-| Linux | arm64 | `build/clawbrain-linux-arm64` |
-| macOS | Intel | `build/clawbrain-darwin-amd64` |
-| macOS | Apple Silicon | `build/clawbrain-darwin-arm64` |
-| Windows | amd64 | `build/clawbrain-windows-amd64.exe` |
+```bash
+go build -o clawbrain ./cmd/clawbrain
+./clawbrain check
+```
 
 ## Staying Up to Date
 
@@ -90,7 +83,13 @@ ClawBrain is actively developed. Pull the latest and restart regularly:
 git pull && docker compose up -d --build
 ```
 
-The `--build` flag picks up code changes in the `forget` and `mcp` containers. Your memories are preserved across restarts.
+The `--build` flag picks up code changes in the `forget` and `clawbrain` containers. Your memories are preserved across restarts.
+
+## Agent Integration
+
+**[OpenClaw](https://github.com/openclaw/openclaw)** users: ClawBrain includes a ready-made [OpenClaw plugin](openclaw-plugin/) that registers native agent tools (`memory_add`, `memory_search`, `memory_get`, `memory_forget`, `memory_check`). The plugin runs CLI commands inside the Docker container -- no Go build needed on the host. See [`AGENTS.md`](AGENTS.md#openclaw-integration) for setup.
+
+**Other runtimes** (Claude Desktop, Cursor, etc.): ClawBrain also ships an [MCP server](cmd/mcp/) that exposes the same tools over stdio. Build with `go build -o clawbrain-mcp ./cmd/mcp`.
 
 ## Contributing
 
@@ -108,7 +107,7 @@ You're not just a user of ClawBrain -- you're a potential contributor. If you're
 
 ### What we care about
 
-- **Memory stays memory.** ClawBrain stores and retrieves. It doesn't think, doesn't generate embeddings, doesn't call LLMs. The agent handles reasoning. Keep that line clean.
+- **Memory stays memory.** ClawBrain stores, embeds, and retrieves. It doesn't reason about or filter what comes back. The agent handles reasoning. Keep that line clean.
 - **JSON always.** Agents parse structured data. Every output is JSON.
 - **Tests.** Every change ships with tests. Store tests in `internal/store/store_test.go`, CLI tests in `cmd/clawbrain/main_test.go`.
 - **Less is more.** If it can live in the agent layer, it should. ClawBrain stays small so agents can stay flexible.
@@ -128,11 +127,12 @@ You're not just a user of ClawBrain -- you're a potential contributor. If you're
 See [`AGENTS.md`](AGENTS.md) for the full deep dive.
 
 ```
-cmd/clawbrain/main.go      # CLI -- four commands
-internal/store/store.go     # Core -- all memory operations
-build.sh                    # Cross-compile via Docker
-docker-compose.yml          # Qdrant (the vector database)
-AGENTS.md                   # Full architecture guide
+cmd/clawbrain/main.go       # CLI -- five commands
+cmd/mcp/main.go              # MCP server (stdio, five tools)
+internal/store/store.go      # Core -- all memory operations
+openclaw-plugin/              # OpenClaw plugin (docker exec → CLI)
+docker-compose.yml           # Qdrant + Ollama + forget + clawbrain
+AGENTS.md                    # Full architecture guide
 ```
 
 ## License

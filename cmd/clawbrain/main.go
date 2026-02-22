@@ -22,6 +22,9 @@ var (
 
 func init() {
 	// Environment variables override defaults (before flags override both).
+	if v := os.Getenv("CLAWBRAIN_HOST"); v != "" {
+		globalHost = v
+	}
 	if v := os.Getenv("CLAWBRAIN_OLLAMA_URL"); v != "" {
 		globalOllamaURL = v
 	}

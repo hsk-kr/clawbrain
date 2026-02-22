@@ -33,6 +33,7 @@ This starts:
 - **Ollama** -- local embedding model for converting text to vectors
 - **ollama-pull** -- one-time init that downloads the `all-minilm` model (~45MB)
 - **forget** -- background process that prunes stale memories
+- **clawbrain** -- CLI container for running commands (used by the OpenClaw plugin)
 
 Wait for `ollama-pull` to finish on first run (downloads the model). After that, startup is instant.
 
@@ -44,7 +45,7 @@ ClawBrain is actively developed. Pull the latest changes and restart the contain
 git pull && docker compose up -d --build
 ```
 
-The `--build` flag rebuilds the `forget` and `mcp` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
+The `--build` flag rebuilds the `forget` and `clawbrain` containers from the updated source. Your stored memories are preserved -- Qdrant data lives in a host-mounted directory (`qdrant_storage/`) that survives restarts and rebuilds.
 
 Make this a habit. An outdated ClawBrain means missing out on better search, better decay, and better tools.
 
@@ -192,3 +193,84 @@ Think of your memory as a garden: plant what matters, water what's still relevan
 4. You recall: `clawbrain search --query 'night theme' --limit 5`
 5. The top result is your dark mode memory -- because ClawBrain understands they mean the same thing
 6. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think
+
+## OpenClaw Integration
+
+[OpenClaw](https://github.com/openclaw/openclaw) agents can use ClawBrain as native tools via a [plugin](https://docs.openclaw.ai/tools/plugin). The plugin runs `clawbrain` CLI commands inside the Docker container and returns structured JSON -- the agent sees typed tools (`memory_add`, `memory_search`, `memory_get`, `memory_forget`, `memory_check`) without constructing bash commands or parsing output.
+
+### Prerequisites
+
+- Docker running with ClawBrain services (`docker compose up -d`)
+- OpenClaw installed and Gateway running
+
+### Install the Plugin
+
+**1. Start ClawBrain:**
+
+```bash
+docker compose up -d
+```
+
+Wait for `ollama-pull` to finish on first run (downloads the embedding model).
+
+**2. Install the plugin into OpenClaw:**
+
+```bash
+openclaw plugins install ./openclaw-plugin
+cd ~/.openclaw/extensions/clawbrain && npm install
+```
+
+Restart the Gateway afterwards.
+
+**3. Configure** in `~/.openclaw/openclaw.json`:
+
+```json5
+{
+  plugins: {
+    entries: {
+      clawbrain: {
+        enabled: true,
+        config: {
+          // Path to the directory containing docker-compose.yml.
+          // Only needed if the Gateway runs from a different directory.
+          // composePath: "/path/to/clawbrain",
+        },
+      },
+    },
+  },
+}
+```
+
+**4. Verify** by starting an OpenClaw session and asking: "Can you check if your memory is working?" The agent should call `memory_check` and confirm connectivity.
+
+### What the Agent Gets
+
+The plugin registers these tools -- the agent calls them like any built-in tool:
+
+| Tool | What it does |
+|---|---|
+| `memory_add` | Store text as a memory. Returns UUID. |
+| `memory_search` | Semantic similarity search. Returns ranked results + confidence. |
+| `memory_get` | Fetch a single memory by UUID. |
+| `memory_forget` | Prune stale memories past TTL (optional tool, opt-in). |
+| `memory_check` | Verify Qdrant + Ollama connectivity. |
+
+Under the hood, each tool call runs `docker compose exec clawbrain clawbrain <command>` inside the container. The agent never constructs bash commands or parses CLI output -- it calls typed functions with structured parameters and gets JSON back.
+
+### Plugin Configuration
+
+| Field | Default | Description |
+|---|---|---|
+| `composePath` | (auto-detect) | Path to the directory containing `docker-compose.yml` |
+| `serviceName` | `clawbrain` | Docker Compose service name for the CLI container |
+| `binaryPath` | (none) | Direct path to a `clawbrain` binary. When set, skips Docker and calls the binary directly. Useful for CI or host-installed setups. |
+
+## MCP Server
+
+ClawBrain also ships an MCP (Model Context Protocol) server for non-OpenClaw runtimes (Claude Desktop, Cursor, etc.) that support MCP natively. The MCP server exposes the same five tools over stdio.
+
+```bash
+go build -o clawbrain-mcp ./cmd/mcp
+```
+
+See [cmd/mcp/](cmd/mcp/) for details.
