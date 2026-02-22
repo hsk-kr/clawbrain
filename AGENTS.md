@@ -226,124 +226,21 @@ The binary reads the same environment variables as the CLI:
 | `CLAWBRAIN_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
 | `CLAWBRAIN_MODEL` | `all-minilm` | Embedding model |
 
-## Integrating with Agent Runtimes
+## OpenClaw Integration
 
-### Claude Desktop / Claude Code / Cursor / Windsurf
-
-These runtimes support MCP servers natively via their config files. Add ClawBrain as a stdio server:
-
-**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
-
-```json
-{
-  "mcpServers": {
-    "clawbrain": {
-      "command": "/path/to/clawbrain-mcp",
-      "env": {
-        "CLAWBRAIN_HOST": "localhost",
-        "CLAWBRAIN_OLLAMA_URL": "http://localhost:11434"
-      }
-    }
-  }
-}
-```
-
-**Cursor** (`.cursor/mcp.json` in your project or `~/.cursor/mcp.json` globally):
-
-```json
-{
-  "mcpServers": {
-    "clawbrain": {
-      "command": "/path/to/clawbrain-mcp",
-      "env": {
-        "CLAWBRAIN_HOST": "localhost",
-        "CLAWBRAIN_OLLAMA_URL": "http://localhost:11434"
-      }
-    }
-  }
-}
-```
-
-Replace `/path/to/clawbrain-mcp` with the actual path to the built binary. If Docker services are running, `localhost` is correct since Qdrant and Ollama bind to `127.0.0.1`.
-
-### mcporter
-
-[mcporter](https://github.com/steipete/mcporter) is a TypeScript runtime and CLI for connecting to MCP servers. It can discover and call ClawBrain's tools from the command line or programmatically.
-
-**1. Install mcporter:**
-
-```bash
-npm install -g mcporter
-```
-
-**2. Add ClawBrain to your mcporter config** (`config/mcporter.json` or `~/.mcporter/mcporter.json`):
-
-```json
-{
-  "mcpServers": {
-    "clawbrain": {
-      "command": "/path/to/clawbrain-mcp",
-      "env": {
-        "CLAWBRAIN_HOST": "localhost",
-        "CLAWBRAIN_OLLAMA_URL": "http://localhost:11434"
-      }
-    }
-  }
-}
-```
-
-**3. Verify the tools are available:**
-
-```bash
-mcporter list clawbrain
-```
-
-This should show all five tools (`add`, `get`, `search`, `forget`, `check`) with their signatures.
-
-**4. Call tools directly:**
-
-```bash
-# Store a memory
-mcporter call clawbrain.add text:'the user prefers dark mode'
-
-# Search memories
-mcporter call clawbrain.search query:'night theme' limit:5
-
-# Check connectivity
-mcporter call clawbrain.check
-```
-
-**5. Use from TypeScript:**
-
-```typescript
-import { createRuntime, createServerProxy } from "mcporter";
-
-const runtime = await createRuntime();
-const memory = createServerProxy(runtime, "clawbrain");
-
-// Store a memory
-await memory.add({ text: "the user prefers dark mode" });
-
-// Search memories
-const results = await memory.search({ query: "night theme", limit: 5 });
-console.log(results.json());
-
-await runtime.close();
-```
-
-mcporter also auto-discovers servers from Claude Desktop, Cursor, Codex, Windsurf, and VS Code configs. If you already configured ClawBrain for any of those, `mcporter list` will find it automatically.
-
-### OpenClaw
-
-[OpenClaw](https://github.com/openclaw/openclaw) uses a skills system to teach its agent how to use tools. To give an OpenClaw agent access to ClawBrain, create a skill that wraps the CLI.
+[OpenClaw](https://github.com/openclaw/openclaw) uses a [skills system](https://docs.openclaw.ai/tools/skills) to teach its agent how to use tools. Skills are [AgentSkills](https://agentskills.io)-compatible folders containing a `SKILL.md` with YAML frontmatter and instructions. To give an OpenClaw agent access to ClawBrain, create a skill that wraps the CLI.
 
 **1. Create the skill directory:**
+
+Skills live in three places (highest to lowest precedence): workspace (`<workspace>/skills`), managed (`~/.openclaw/skills`), and bundled. For a workspace-level skill:
 
 ```bash
 mkdir -p ~/.openclaw/workspace/skills/clawbrain
 ```
 
-**2. Create `~/.openclaw/workspace/skills/clawbrain/SKILL.md`:**
+To share the skill across all agents on the machine, use `~/.openclaw/skills/clawbrain` instead.
+
+**2. Create `SKILL.md`:**
 
 ```markdown
 ---
@@ -385,17 +282,8 @@ clawbrain check
 - All output is JSON.
 ```
 
+The `metadata.openclaw.requires.bins` field gates the skill -- OpenClaw only loads it when `clawbrain` is found on `PATH`. If the binary is missing, the skill is silently skipped.
+
 **3. Make sure the `clawbrain` binary is on PATH** and Docker services are running (`docker compose up -d`).
 
-**4. Verify** by starting an OpenClaw session and asking: "Can you check if your memory is working?" The agent should call `clawbrain check` and confirm connectivity.
-
-### Other MCP-Compatible Runtimes
-
-Any runtime that supports MCP stdio servers can use ClawBrain. The pattern is the same:
-
-1. Build the binary: `go build -o clawbrain-mcp ./cmd/mcp`
-2. Point the runtime at the binary as a stdio command
-3. Set `CLAWBRAIN_HOST` and `CLAWBRAIN_OLLAMA_URL` environment variables
-4. The server exposes tools named `add`, `get`, `search`, `forget`, and `check`
-
-The MCP server uses the [Model Context Protocol Go SDK](https://github.com/modelcontextprotocol/go-sdk) and identifies itself as `clawbrain` version `1.0.0`.
+**4. Verify** by starting an OpenClaw session and asking: "Can you check if your memory is working?" The agent should call `clawbrain check` and confirm connectivity. Skills are snapshotted at session start, so restart the session if the skill was just created.
