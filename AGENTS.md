@@ -192,3 +192,210 @@ Think of your memory as a garden: plant what matters, water what's still relevan
 4. You recall: `clawbrain search --query 'night theme' --limit 5`
 5. The top result is your dark mode memory -- because ClawBrain understands they mean the same thing
 6. You use the results in your own reasoning -- ClawBrain doesn't tell you what to think
+
+## MCP Server
+
+ClawBrain ships an MCP (Model Context Protocol) server so AI agents can use memory as a native tool -- search when thinking, store when learning -- without shelling out to the CLI manually.
+
+The MCP server communicates over **stdio** and exposes five tools:
+
+| Tool | Description |
+|---|---|
+| `add` | Store a memory. Text is embedded and stored. Returns the UUID. |
+| `get` | Fetch a single memory by UUID. |
+| `search` | Semantic similarity search. Returns ranked results with confidence levels. |
+| `forget` | Prune stale memories past the TTL. Pinned memories are never deleted. |
+| `check` | Verify connectivity to Qdrant and Ollama. |
+
+The server is already running as a Docker service (`mcp` in `docker-compose.yml`). For agent integrations below, you can either use the Docker container or build the binary directly.
+
+### Build the MCP Binary (Optional)
+
+If you need the binary outside Docker:
+
+```bash
+go build -o clawbrain-mcp ./cmd/mcp
+```
+
+The binary reads the same environment variables as the CLI:
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CLAWBRAIN_HOST` | `localhost` | Qdrant host |
+| `CLAWBRAIN_PORT` | `6334` | Qdrant gRPC port |
+| `CLAWBRAIN_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
+| `CLAWBRAIN_MODEL` | `all-minilm` | Embedding model |
+
+## Integrating with Agent Runtimes
+
+### Claude Desktop / Claude Code / Cursor / Windsurf
+
+These runtimes support MCP servers natively via their config files. Add ClawBrain as a stdio server:
+
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+
+```json
+{
+  "mcpServers": {
+    "clawbrain": {
+      "command": "/path/to/clawbrain-mcp",
+      "env": {
+        "CLAWBRAIN_HOST": "localhost",
+        "CLAWBRAIN_OLLAMA_URL": "http://localhost:11434"
+      }
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json` in your project or `~/.cursor/mcp.json` globally):
+
+```json
+{
+  "mcpServers": {
+    "clawbrain": {
+      "command": "/path/to/clawbrain-mcp",
+      "env": {
+        "CLAWBRAIN_HOST": "localhost",
+        "CLAWBRAIN_OLLAMA_URL": "http://localhost:11434"
+      }
+    }
+  }
+}
+```
+
+Replace `/path/to/clawbrain-mcp` with the actual path to the built binary. If Docker services are running, `localhost` is correct since Qdrant and Ollama bind to `127.0.0.1`.
+
+### mcporter
+
+[mcporter](https://github.com/steipete/mcporter) is a TypeScript runtime and CLI for connecting to MCP servers. It can discover and call ClawBrain's tools from the command line or programmatically.
+
+**1. Install mcporter:**
+
+```bash
+npm install -g mcporter
+```
+
+**2. Add ClawBrain to your mcporter config** (`config/mcporter.json` or `~/.mcporter/mcporter.json`):
+
+```json
+{
+  "mcpServers": {
+    "clawbrain": {
+      "command": "/path/to/clawbrain-mcp",
+      "env": {
+        "CLAWBRAIN_HOST": "localhost",
+        "CLAWBRAIN_OLLAMA_URL": "http://localhost:11434"
+      }
+    }
+  }
+}
+```
+
+**3. Verify the tools are available:**
+
+```bash
+mcporter list clawbrain
+```
+
+This should show all five tools (`add`, `get`, `search`, `forget`, `check`) with their signatures.
+
+**4. Call tools directly:**
+
+```bash
+# Store a memory
+mcporter call clawbrain.add text:'the user prefers dark mode'
+
+# Search memories
+mcporter call clawbrain.search query:'night theme' limit:5
+
+# Check connectivity
+mcporter call clawbrain.check
+```
+
+**5. Use from TypeScript:**
+
+```typescript
+import { createRuntime, createServerProxy } from "mcporter";
+
+const runtime = await createRuntime();
+const memory = createServerProxy(runtime, "clawbrain");
+
+// Store a memory
+await memory.add({ text: "the user prefers dark mode" });
+
+// Search memories
+const results = await memory.search({ query: "night theme", limit: 5 });
+console.log(results.json());
+
+await runtime.close();
+```
+
+mcporter also auto-discovers servers from Claude Desktop, Cursor, Codex, Windsurf, and VS Code configs. If you already configured ClawBrain for any of those, `mcporter list` will find it automatically.
+
+### OpenClaw
+
+[OpenClaw](https://github.com/openclaw/openclaw) uses a skills system to teach its agent how to use tools. To give an OpenClaw agent access to ClawBrain, create a skill that wraps the CLI.
+
+**1. Create the skill directory:**
+
+```bash
+mkdir -p ~/.openclaw/workspace/skills/clawbrain
+```
+
+**2. Create `~/.openclaw/workspace/skills/clawbrain/SKILL.md`:**
+
+```markdown
+---
+name: clawbrain
+description: Persistent semantic memory. Store text, search by meaning, recall across sessions.
+metadata: {"openclaw": {"requires": {"bins": ["clawbrain"]}, "emoji": "🧠"}}
+---
+
+You have persistent memory via ClawBrain. Use it to remember things across sessions.
+
+## Commands
+
+Store a memory:
+\`\`\`bash
+clawbrain add --text 'what you want to remember'
+\`\`\`
+
+Search memories (semantic -- meaning, not keywords):
+\`\`\`bash
+clawbrain search --query 'what you are looking for' --limit 5
+\`\`\`
+
+Fetch a specific memory by ID:
+\`\`\`bash
+clawbrain get --id <uuid>
+\`\`\`
+
+Check that memory is operational:
+\`\`\`bash
+clawbrain check
+\`\`\`
+
+## Guidelines
+
+- Search multiple times with different queries before concluding you don't remember something.
+- Store things worth remembering: user preferences, project context, decisions, learnings.
+- Pin critical memories with `--pinned` so they never expire.
+- Memories you never recall fade after 30 days. Recall keeps them alive.
+- All output is JSON.
+```
+
+**3. Make sure the `clawbrain` binary is on PATH** and Docker services are running (`docker compose up -d`).
+
+**4. Verify** by starting an OpenClaw session and asking: "Can you check if your memory is working?" The agent should call `clawbrain check` and confirm connectivity.
+
+### Other MCP-Compatible Runtimes
+
+Any runtime that supports MCP stdio servers can use ClawBrain. The pattern is the same:
+
+1. Build the binary: `go build -o clawbrain-mcp ./cmd/mcp`
+2. Point the runtime at the binary as a stdio command
+3. Set `CLAWBRAIN_HOST` and `CLAWBRAIN_OLLAMA_URL` environment variables
+4. The server exposes tools named `add`, `get`, `search`, `forget`, and `check`
+
+The MCP server uses the [Model Context Protocol Go SDK](https://github.com/modelcontextprotocol/go-sdk) and identifies itself as `clawbrain` version `1.0.0`.
