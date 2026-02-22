@@ -20,9 +20,13 @@ log() {
     echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"
 }
 
-# Wait for Qdrant to be reachable
+# Wait for Qdrant to be reachable.
+# Use a direct TCP probe rather than 'clawbrain check' — check also verifies
+# Ollama, which forget never calls (no embeddings needed for pruning). If
+# Ollama is temporarily unavailable, the forget sidecar would otherwise block
+# indefinitely even though Qdrant is healthy and forget can run normally.
 log "Waiting for Qdrant at ${HOST}:6334..."
-while ! "${CLAWBRAIN}" --host "${HOST}" check >/dev/null 2>&1; do
+while ! nc -z "${HOST}" 6334 2>/dev/null; do
     sleep 2
 done
 log "Qdrant is up."
