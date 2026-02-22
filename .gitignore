@@ -1,8 +1,9 @@
 # Qdrant data
 qdrant_storage/
 
-# Go binaries (local dev only, not the build/ output)
+# Go binaries
 /clawbrain
+build/
 *.dll
 *.so
 *.dylib
